@@ -98,18 +98,36 @@
     .pa-save.pa-save-ok { color: #3CCF8F; }
     .pa-save.pa-save-warn { color: #FBBF24; }
     .pa-cursor { font-size: 0.72rem; color: #8B90A6; font-variant-numeric: tabular-nums; }
-    .pa-editor-body { display: flex; height: 430px; }
+    .pa-editor-body { display: flex; height: 430px; position: relative; }
     .pa-gutter { flex: 0 0 52px; overflow: hidden; background: #16171F; border-right: 1px solid #26283A; height: 100%; }
     .pa-gutter-lines { padding: 16px 0; white-space: pre; font-family: 'SFMono-Regular', Consolas, 'Cascadia Mono', monospace; font-size: 13.5px; line-height: 1.7; color: #5A5F76; text-align: right; padding-right: 12px; user-select: none; }
     #editor {
       flex: 1; width: 100%; height: 100%; resize: none; border: none; outline: none;
-      background: transparent; color: #D9DCE8;
+      position: relative; z-index: 1;
+      background: transparent; color: transparent; caret-color: #818CF8;
       font-family: 'SFMono-Regular', Consolas, 'Cascadia Mono', 'JetBrains Mono', monospace;
       font-size: 13.5px; line-height: 1.7; tab-size: 2; padding: 16px 16px; box-sizing: border-box;
-      caret-color: #818CF8; white-space: pre; overflow: auto;
+      white-space: pre; overflow: auto;
     }
+    #editor::selection { background: transparent; }
     #editor:disabled { opacity: 0.7; }
     #editor::placeholder { color: #5A5F76; }
+
+    /* ---- SYNTAX HIGHLIGHT LAYER ---- */
+    .pa-highlight { position: absolute; top: 0; bottom: 0; left: 52px; right: 0; z-index: 0;
+      margin: 0; padding: 16px 16px; box-sizing: border-box; overflow: hidden; pointer-events: none;
+      font-family: 'SFMono-Regular', Consolas, 'Cascadia Mono', 'JetBrains Mono', monospace;
+      font-size: 13.5px; line-height: 1.7; tab-size: 2; white-space: pre; color: #D9DCE8;
+      background: transparent; }
+    .tok-kw  { color: #C678DD; }   /* keywords */
+    .tok-type{ color: #56B6C2; }   /* data types */
+    .tok-var { color: #DCDCAA; }   /* variables */
+    .tok-fn  { color: #61AFEF; }   /* function calls */
+    .tok-num { color: #D19A66; }   /* numbers */
+    .tok-str { color: #98C379; }   /* strings / chars */
+    .tok-cmt { color: #6B7280; font-style: italic; } /* comments */
+    .tok-pre { color: #E06C75; font-style: italic; } /* preprocessor */
+    .hl-sel  { background: rgba(97,175,239,0.28); } /* current text selection */
 
     .pa-console { background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-lg); overflow: hidden; display: flex; flex-direction: column; }
     .pa-console-head { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--card-border); background: var(--bg-secondary); }
@@ -266,6 +284,7 @@
           </div>
           <div class="pa-editor-body">
             <div class="pa-gutter" id="gutterWrap"><div class="pa-gutter-lines" id="gutterLines"></div></div>
+            <div class="pa-highlight" id="highlightLayer" aria-hidden="true"></div>
             <textarea id="editor" spellcheck="false" autocomplete="off" autocapitalize="off"
               placeholder="Write your solution here. Tab inserts spaces, Ctrl/Cmd+S saves."></textarea>
           </div>
@@ -555,6 +574,84 @@
       const upTo = ta.value.slice(0, ta.selectionStart).split('\n');
       $('cursorPos').textContent = 'Ln ' + upTo.length + ', Col ' + ((upTo[upTo.length - 1] || '').length + 1);
     }
+
+    // ---------- SYNTAX HIGHLIGHTING (overlay) ----------
+    const HL_LANGS = {
+      'c': {
+        line: '//', pre: true,
+        kw: ['auto','break','case','const','continue','default','do','else','enum','extern','for','goto','if','inline','register','return','restrict','sizeof','static','struct','switch','typedef','union','volatile','while','_Bool','_Complex','_Generic','signed','unsigned','void'],
+        types: ['int','char','float','double','long','short','size_t','ssize_t','int8_t','int16_t','int32_t','int64_t','uint8_t','uint16_t','uint32_t','uint64_t','FILE','bool']
+      },
+      'c++': {
+        line: '//', pre: true,
+        kw: ['alignas','alignof','and','asm','auto','bitand','bitor','break','case','catch','class','const','consteval','constexpr','constinit','continue','co_await','co_return','co_yield','delete','do','dynamic_cast','else','enum','explicit','export','extern','for','friend','goto','if','inline','mutable','namespace','new','noexcept','not','operator','or','private','protected','public','register','reinterpret_cast','requires','return','sizeof','static','static_cast','switch','template','this','thread_local','throw','try','typedef','typename','union','using','virtual','volatile','while','xor','final','override','struct','class'],
+        types: ['int','char','float','double','long','short','bool','void','signed','unsigned','string','wchar_t','auto','size_t','vector','map','set','pair','unordered_map','unordered_set','deque','list','stack','queue','priority_queue','string_view','optional','unique_ptr','shared_ptr','true','false','nullptr','max','min']
+      },
+      'csharp': {
+        line: '//', pre: false,
+        kw: ['abstract','as','base','break','case','catch','checked','class','const','continue','delegate','do','else','enum','event','explicit','extern','finally','fixed','for','foreach','goto','if','implicit','in','interface','internal','is','lock','namespace','new','operator','out','override','params','private','protected','public','readonly','ref','return','sealed','sizeof','stackalloc','static','struct','switch','this','throw','try','typeof','unchecked','unsafe','using','virtual','volatile','while','async','await','get','set','value','var','yield','partial','record','init','when','where'],
+        types: ['int','uint','long','ulong','short','ushort','byte','sbyte','float','double','decimal','bool','char','string','object','void','List','Dictionary','HashSet','Queue','Stack','Tuple','stringbuilder','StringBuilder','Console','Math','Task','null','true','false','dynamic']
+      },
+      'java': {
+        line: '//', pre: false,
+        kw: ['abstract','assert','break','case','catch','class','const','continue','default','do','else','enum','extends','final','finally','for','goto','if','implements','import','instanceof','interface','native','new','package','private','protected','public','return','static','strictfp','super','switch','synchronized','this','throw','throws','transient','try','void','volatile','while','record','sealed','yield','var','permitted','_'],
+        types: ['int','long','float','double','boolean','char','byte','short','String','Integer','Long','Float','Double','Boolean','Character','Byte','Short','Math','Object','List','ArrayList','HashMap','HashSet','Arrays','Collections','System','true','false','null','Scanner','void']
+      },
+      'python': {
+        line: '#', pre: false,
+        kw: ['and','as','assert','async','await','break','class','continue','def','del','elif','else','except','finally','for','from','global','if','import','in','is','lambda','nonlocal','not','or','pass','raise','return','try','while','with','yield','match','case','None','True','False'],
+        types: ['int','float','str','bool','list','dict','tuple','set','bytes','complex','range','object','self','__init__','print']
+      }
+    };
+    function hlEscape(s) { return s.replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+    function highlightToHtml(src) {
+      const cfg = HL_LANGS[RUN_LANG] || HL_LANGS['c++'];
+      const re = new RegExp([
+        /\/\*[\s\S]*?\*\//.source,
+        /"""[\s\S]*?"""|'''[\s\S]*?'''/.source,
+        /"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/.source,
+        /\b(?:0[xX][0-9a-fA-F]+(?:\.[0-9a-fA-F]+)?|\d[\d_]*(?:\.[\d_]+)?(?:[eE][+-]?\d+)?)\b/.source,
+        cfg.pre ? /(?:^\s*|\n\s*)#[^\n]*/.source : '',
+        cfg.line === '#' ? /#[^\n]*/.source : /\/\/[^\n]*/.source,
+        /[A-Za-z_]\w*/.source
+      ].filter(Boolean).join('|'), 'gm');
+      let out = '', last = 0, m;
+      while ((m = re.exec(src))) {
+        out += hlEscape(src.slice(last, m.index));
+        const t = m[0];
+        let cls;
+        if (/^\/\*|^\/\/|^#/.test(t)) cls = cfg.pre && /^#/.test(t) ? 'tok-pre' : 'tok-cmt';
+        else if (/^["']/.test(t)) cls = 'tok-str';
+        else if (/^\d|\b0[xX]/.test(t)) cls = 'tok-num';
+        else if (cfg.kw && cfg.kw.indexOf(t) !== -1) cls = 'tok-kw';
+        else if (cfg.types && cfg.types.indexOf(t) !== -1) cls = 'tok-type';
+        else if (/\s*\(/.test(src.slice(m.index + t.length, m.index + t.length + 32))) cls = 'tok-fn';
+        else cls = 'tok-var';
+        out += '<span class="' + cls + '">' + hlEscape(t) + '</span>';
+        last = m.index + t.length;
+      }
+      out += hlEscape(src.slice(last));
+      return out;
+    }
+    function syncHighlight() {
+      const hl = $('highlightLayer');
+      if (!hl) return;
+      const ta = $('editor');
+      hl.style.transform = 'translate(' + (-ta.scrollLeft) + 'px,' + (-ta.scrollTop) + 'px)';
+    }
+    function renderHighlight() {
+      const ta = $('editor'), hl = $('highlightLayer');
+      if (!hl) return;
+      const src = ta.value || '';
+      const s = Math.min(ta.selectionStart, ta.selectionEnd);
+      const e = Math.max(ta.selectionStart, ta.selectionEnd);
+      let html = '';
+      if (s > 0) html += highlightToHtml(src.slice(0, s));
+      if (e > s) html += '<mark class="hl-sel">' + highlightToHtml(src.slice(s, e)) + '</mark>';
+      if (e < src.length) html += highlightToHtml(src.slice(e));
+      hl.innerHTML = html + '<br>';
+      syncHighlight();
+    }
     function updateSaveStatus(state) {
       const el = $('saveStatus');
       if (state === 'error') { el.textContent = 'Save failed'; el.className = 'pa-save pa-save-warn'; return; }
@@ -585,17 +682,19 @@
     }
     function bindEditor() {
       const ta = $('editor'), gw = $('gutterWrap');
-      ta.addEventListener('input', () => { syncGutter(); updateCursor(); scheduleSave(); });
-      ta.addEventListener('keyup', updateCursor);
-      ta.addEventListener('click', updateCursor);
-      ta.addEventListener('scroll', () => { gw.scrollTop = ta.scrollTop; });
+      ta.addEventListener('input', () => { syncGutter(); updateCursor(); renderHighlight(); scheduleSave(); });
+      ta.addEventListener('keyup', () => { updateCursor(); renderHighlight(); });
+      ta.addEventListener('click', () => { updateCursor(); renderHighlight(); });
+      ta.addEventListener('mouseup', renderHighlight);
+      ta.addEventListener('select', renderHighlight);
+      ta.addEventListener('scroll', () => { gw.scrollTop = ta.scrollTop; syncHighlight(); });
       ta.addEventListener('keydown', (e) => {
         if (e.key === 'Tab' && !checkingAll) {
           e.preventDefault();
           const s = ta.selectionStart, en = ta.selectionEnd;
           ta.value = ta.value.slice(0, s) + '  ' + ta.value.slice(en);
           ta.selectionStart = ta.selectionEnd = s + 2;
-          syncGutter(); updateCursor(); scheduleSave();
+          syncGutter(); updateCursor(); renderHighlight(); scheduleSave();
         }
         if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); manualSave(); }
       });
@@ -605,7 +704,7 @@
         const saved = await Programming.loadSavedCode(ACTIVITY_ID, p.id);
         if (saved && saved.source) {
           currentCodeByProblem[p.id] = saved.source;
-          if (PROBLEMS[CURRENT].id === p.id) { $('editor').value = saved.source; syncGutter(); updateCursor(); updateSaveStatus(); }
+          if (PROBLEMS[CURRENT].id === p.id) { $('editor').value = saved.source; syncGutter(); updateCursor(); renderHighlight(); updateSaveStatus(); }
           VISITED[p.id] = true;
         }
       } catch (e) { console.error(e); }
@@ -618,7 +717,7 @@
       CURRENT = i;
       renderProblemList(); renderStatement(next);
       resetConsole();
-      $('editor').value = codeFor(next); syncGutter(); updateCursor();
+      $('editor').value = codeFor(next); syncGutter(); updateCursor(); renderHighlight();
       loadSamples(next);
       if (!VISITED[next.id]) loadRemote(next);
     }
@@ -767,7 +866,9 @@
         await ProgLive.setFinal(LIVE_GAME.id, {
           total_score: (res && res.ok) ? res.totalScore : Math.max(0, currentGrossScore() - (VIOLATIONS * penaltyPerViolation())),
           total_points: totalPoints, problems_solved: currentSolved(),
-          violations: VIOLATIONS, completed: !!(res && res.completed)
+          violations: VIOLATIONS,
+          penalty_points: VIOLATIONS * penaltyPerViolation(),
+          completed: !!(res && res.completed)
         });
       }
       Utils.showToast('Submitted! Score: ' + (res && res.ok ? res.totalScore : 0), 'success');
@@ -879,9 +980,12 @@
       if (g.status === 'running' && (!prev || prev.status !== 'running')) {
         startContestSession();
       } else if (g.status === 'ended') {
-        if (!contestActive) return;
-        contestActive = false;
-        onTimeUp();
+        if (contestActive) {
+          contestActive = false;
+          onTimeUp();
+        } else {
+          window.location.replace('results.html?activity=' + encodeURIComponent(ACTIVITY_ID || ''));
+        }
       } else if (g.status === 'running' && prev && prev.status === 'running') {
         showTimer(Math.max(0, Math.ceil((ProgLive.remainingMs(g) || 0) / 1000)));
       }
@@ -920,10 +1024,15 @@
         $('waitingPin').textContent = game.pin;
         $('liveScore').textContent = '0';
         updateViolUI();
+        if (game.status === 'ended') {
+          window.location.replace('results.html?activity=' + encodeURIComponent(game.activity_id || ''));
+          return true;
+        }
         if (game.status === 'running') {
           startContestSession();
         } else {
           showWaiting();
+          startLiveTicking();
         }
         return true;
       });
@@ -976,7 +1085,7 @@
         renderStatement(PROBLEMS[0]);
         bindEditor();
         $('editor').value = codeFor(PROBLEMS[0]);
-        syncGutter(); updateCursor();
+        syncGutter(); updateCursor(); renderHighlight();
         await loadSamples(PROBLEMS[0]);
         refreshProgressCard();
 
@@ -984,7 +1093,11 @@
           if (LIVE_GAME && typeof supabaseClient.channel === 'function') {
             LIVE_CHANNEL = ProgLive.subscribeGame(LIVE_GAME.id, onLiveGameUpdate);
           }
-          if (LIVE_GAME.status === 'running') startLiveTicking();
+          if (LIVE_GAME && LIVE_GAME.status === 'ended') {
+            window.location.replace('results.html?activity=' + encodeURIComponent(ACTIVITY_ID || ''));
+            return;
+          }
+          if (LIVE_GAME && LIVE_GAME.status === 'running') startLiveTicking();
         } else {
           startStandaloneTimer();
           contestActive = true;   // standalone: rules active from the start

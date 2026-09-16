@@ -56,6 +56,15 @@ The whole system shares one design language:
 2. Turn **OFF** "Confirm email"
 3. Click Save
 
+### Step 3 (optional): Deploy the code runner
+Run/Check code works out of the box through the **public Judge0 CE sandbox** (`ce.judge0.com`, CORS-open, no key). For the recommended server-side grader (rate-limit safe, self-hostable later), deploy the included Edge Function once:
+
+```
+npx supabase functions deploy programming-run --project-ref rknsbfykyulrejnbwjuf
+```
+
+The browser tries this function first and falls back to the public Judge0 CE instance automatically, so you can deploy it at any time.
+
 ---
 
 ## How to Use

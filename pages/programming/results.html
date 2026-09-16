@@ -9,6 +9,11 @@
   <script>document.documentElement.classList.add('auth-gate');</script>
   <style>
     .auth-gate body { visibility: hidden; }
+    .prog-code-details { margin-top: 8px; }
+    .prog-code-details summary { cursor: pointer; font-size: 0.78rem; font-weight: 700; color: var(--accent); }
+    .prog-code-pre { background: var(--bg-secondary); border: 1px solid var(--card-border); border-radius: 8px;
+      padding: 10px 12px; margin: 6px 0 0; font-family: 'SFMono-Regular', Consolas, 'Cascadia Mono', monospace;
+      font-size: 0.75rem; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: var(--text-secondary); }
   </style>
   </head>
 <body>
@@ -215,7 +220,10 @@
       let note = '';
       if (!view.isTeacher && view.students.length) {
         const s = view.students[0];
-        note = '<p class="prog-hero-note" style="margin-bottom:14px;">Your own result &mdash; last submitted ' + fmtDT(s.submitted_at) + '. Reading your own submissions is your own work; the teacher sees the whole class.</p>';
+        const v = parseInt((s && s.violations) || 0, 10);
+        note = '<p class="prog-hero-note" style="margin-bottom:14px;">Your own result &mdash; last submitted ' + fmtDT(s.submitted_at) + '.' +
+          (v ? ' <b>' + v + ' rule violation' + (v > 1 ? 's' : '') + ' (-' + (parseInt((s && s.penalty_points) || 0, 10)) + ' pts)</b> already deducted from your final score.'
+             : ' No rule violations were recorded for you.') + '</p>';
       }
       if (!view.students.length) {
         area.innerHTML = note + '<div class="prog-empty"><div class="prog-empty-icon">&#128197;</div><p>No students have finished this activity yet.</p></div>';
@@ -262,11 +270,18 @@
             '<td class="prog-muted">' + fmtDT(sub.submitted_at) + '</td>' +
           '</tr>' +
           '<tr id="subdetail-' + si + '-' + j + '" style="display:none;">' +
-            '<td colspan="6">' + testCaseTable(sub) + '</td>' +
+            '<td colspan="6">' + codeDetail(sub) + testCaseTable(sub) + '</td>' +
           '</tr>';
         }
       });
       return h + '</tbody></table>';
+    }
+
+    function codeDetail(sub) {
+      const code = (sub && sub.source_code) ? String(sub.source_code) : '';
+      if (!code) return '';
+      return '<details class="prog-code-details"><summary>Show submitted code</summary>' +
+        '<pre class="prog-code-pre">' + Utils.sanitize(code) + '</pre></details>';
     }
 
     function testCaseTable(sub) {

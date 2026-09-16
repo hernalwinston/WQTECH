@@ -136,26 +136,131 @@ window.Programming = (function () {
 
   // ------------------------------------------------------------------
   // EXECUTION - sandboxed. NEVER run student code directly on this server.
-  // The Edge Function (supabase/functions/programming-run) forwards into a
-  // containerized sandbox (Piston API by default) with strict limits:
-  //   time, memory, file system, sandbox isolation, no network for code.
+  // Preferred path is the Edge Function (supabase/functions/programming-run),
+  // which relays into a containerized judge (Judge0 CE). If it is not
+  // deployed, the browser automatically calls the public Judge0 CE sandbox
+  // directly, so the app keeps working out of the box.
   // ------------------------------------------------------------------
   const FUNCTIONS_BASE = (typeof SUPABASE_URL !== 'undefined')
     ? SUPABASE_URL.replace(/\/$/, '') + '/functions/v1/programming-run'
     : '';
 
+  // Public Judge0 CE sandbox. Used as an automatic fallback so Run/Check
+  // works even before (or without) the Supabase Edge Function being deployed.
+  const JUDGE0_PUBLIC = 'https://ce.judge0.com/submissions';
+
+  // App language -> Judge0 CE language_id (stable for the CE language set).
+  function judge0LangId(language) {
+    const l = String(language || '').toLowerCase();
+    if (l === 'c') return 50;
+    if (l === 'c++' || l === 'cplusplus' || l === 'cpp') return 54;
+    if (l === 'c#' || l === 'csharp' || l === 'cs') return 51;
+    if (l === 'java') return 62;
+    if (l === 'python' || l === 'python3') return 71;
+    return 54;
+  }
+
+  // Accepts EITHER the Edge Function response, the raw Piston shape, OR the
+  // raw Judge0 shape, and normalizes everything to the single shape the rest
+  // of the app expects: { stdout, stderr, compile_error, compile_output,
+  // runtime_error, status ('tle' | ''), time_ms }.
+  function normalizeRun(raw) {
+    if (!raw || typeof raw !== 'object') return {};
+
+    // ---- Judge0 CE shape (public API / Edge Function relay) ----
+    if (raw.status && typeof raw.status === 'object' && 'id' in raw.status) {
+      const sid = parseInt(raw.status.id, 10);
+      const stdout = String(raw.stdout || '').replace(/\s+$/g, '');
+      const stderr = String(raw.stderr || '').replace(/\s+$/g, '');
+      let compile_error = '', runtime_error = '';
+      if (sid === 6) compile_error = String(raw.compile_output || '').replace(/\s+$/g, '');
+      else if (sid >= 7 && sid <= 12) runtime_error = stderr || ('Runtime error (' + (raw.status.description || 'unknown') + ')');
+      return {
+        stdout,
+        stderr,
+        compile_error,
+        compile_output: '',
+        runtime_error,
+        status: sid === 5 ? 'tle' : (sid === 3 || sid === 4 ? '' : (raw.status.description || '')),
+        time_ms: typeof raw.time === 'number' ? Math.round(raw.time * 1000)
+               : (raw.time != null ? Math.round(parseFloat(raw.time) * 1000) : undefined)
+      };
+    }
+
+    // ---- Piston shape (self-hosted runner / legacy) ----
+    const run = raw.run || {};
+    const compile = raw.compile || {};
+    const stdout = String(raw.stdout != null ? raw.stdout : (run.stdout || '')).replace(/\s+$/g, '');
+    const stderr = String(raw.stderr != null ? raw.stderr : (run.stderr || '')).replace(/\s+$/g, '');
+    const compileErr = (raw.compile_error != null) ? raw.compile_error
+                     : (compile && compile.stderr) ? compile.stderr : '';
+    const compileOut = (raw.compile_output != null) ? raw.compile_output
+                     : (compile && compile.stdout) ? compile.stdout : '';
+    const runSig = raw.signals || (run && run.signal) || null;
+    const runCode = (typeof raw.exit_code === 'number') ? raw.exit_code : (run && run.code);
+    const timedOut = runSig === 'SIGKILL' || runCode === 124 || runCode === 137;
+    const hasCompileErr = !!(compileErr);
+    let runtimeError = '';
+    if (raw.runtime_error != null) runtimeError = raw.runtime_error;
+    else if (!hasCompileErr && runCode != null && runCode !== 0) {
+      runtimeError = stderr || (timedOut ? '' : ('Program exited with code ' + runCode));
+    }
+    return {
+      stdout,
+      stderr,
+      compile_error: compileErr || '',
+      compile_output: compileOut || '',
+      runtime_error: runtimeError || '',
+      status: timedOut ? 'tle' : (raw.status || ''),
+      time_ms: typeof raw.time_ms === 'number' ? raw.time_ms : undefined
+    };
+  }
+
+  async function getAccessToken() {
+    try {
+      const { data } = await supabaseClient.auth.getSession();
+      return (data && data.session && data.session.access_token) || '';
+    } catch (e) { return ''; }
+  }
+
   async function runInSandbox({ language, source, stdin, timeoutMs }) {
-    if (!FUNCTIONS_BASE) throw new Error('Programming runner not configured.');
-    const res = await fetch(FUNCTIONS_BASE, {
+    const t = parseInt(timeoutMs, 10) || 4000;
+    if (!source) throw new Error('No code to run.');
+
+    // 1) Preferred: your own Supabase Edge Function (server -> judge).
+    if (FUNCTIONS_BASE) {
+      try {
+        const controller = new AbortController();
+        const to = setTimeout(() => controller.abort(), Math.min(t + 8000, 20000));
+        const token = await getAccessToken();
+        const res = await fetch(FUNCTIONS_BASE, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+          body: JSON.stringify({ language, source, stdin: stdin || '', timeout_ms: t }),
+          signal: controller.signal
+        });
+        clearTimeout(to);
+        if (res.ok) return normalizeRun(await res.json());
+      } catch (e) { /* unreachable / not deployed / CORS -> fall through to Judge0 */ }
+    }
+
+    // 2) Fallback: Judge0 CE directly from the browser.
+    const res = await fetch(JUDGE0_PUBLIC + '?base64_encoded=false&wait=true', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (Auth.accessToken || '') },
-      body: JSON.stringify({ language, source, stdin: stdin || '', timeout_ms: timeoutMs || 4000 })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        source_code: source,
+        language_id: judge0LangId(language),
+        stdin: stdin || '',
+        cpu_time_limit: Math.min(Math.max(Math.ceil(t / 1000), 1), 10),
+        memory_limit: 131072
+      })
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       throw new Error((body && body.message) || ('Runner error ' + res.status));
     }
-    return await res.json();
+    return normalizeRun(await res.json());
   }
 
   // One test case => run => pass/fail
@@ -169,7 +274,7 @@ window.Programming = (function () {
       });
       const out = normalizeOutput(run.stdout || '');
       const expected = normalizeOutput(testCase.expected_output || '');
-      const passed = (run.compile_error || run.runtime_error || run.signals
+      const passed = (run.compile_error || run.runtime_error
                      || run.status === 'tle') ? false : (out === expected);
       return {
         test_case_id: testCase.id,
@@ -187,7 +292,7 @@ window.Programming = (function () {
     } catch (e) {
       return { test_case_id: testCase.id, label: testCase.label || '', input: '', expected: '',
                output: '', passed: false, points: 0, runtime_ms: 0,
-               message: 'Runner unavailable' };
+               message: (e && e.message) || 'Runner unavailable' };
     }
   }
 

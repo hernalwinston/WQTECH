@@ -86,18 +86,19 @@ window.ProgLive = (function () {
   async function joinGame(pin) {
     const game = await getGameByPin(pin);
     if (!game) throw new Error('No live contest found for that PIN.');
-    if (game.status === 'ended') throw new Error('This contest has already ended.');
     const user = uid();
     if (!user) throw new Error('You must be signed in.');
-    const { error: pe } = await cx.from('prog_game_players').upsert({
-      game_id: game.id, user_id: user, player_name: name()
-    }, { onConflict: 'game_id,user_id' });
-    if (pe) throw pe;
-    await cx.from('prog_game_results').upsert({
-      game_id: game.id, user_id: user, player_name: name(),
-      total_score: 0, total_points: 0, problems_solved: 0,
-      violations: 0, penalty_points: 0, status: 'in_progress'
-    }, { onConflict: 'game_id,user_id', ignoreDuplicates: true });
+    if (game.status !== 'ended') {
+      const { error: pe } = await cx.from('prog_game_players').upsert({
+        game_id: game.id, user_id: user, player_name: name()
+      }, { onConflict: 'game_id,user_id' });
+      if (pe) throw pe;
+      await cx.from('prog_game_results').upsert({
+        game_id: game.id, user_id: user, player_name: name(),
+        total_score: 0, total_points: 0, problems_solved: 0,
+        violations: 0, penalty_points: 0, status: 'in_progress'
+      }, { onConflict: 'game_id,user_id', ignoreDuplicates: true });
+    }
     return game;
   }
 
@@ -123,12 +124,15 @@ window.ProgLive = (function () {
     const user = uid();
     let violations = 1;
     const { data: row } = await cx.from('prog_game_results')
-      .select('violations, total_score, total_points, problems_solved, penalty_points')
+      .select('violations, penalty_points')
       .eq('game_id', gameId).eq('user_id', user).maybeSingle();
     if (row) violations = (parseInt(row.violations, 10) || 0) + 1;
+    const game = await getGame(gameId).catch(() => null);
+    const penalty = (game && parseInt(game.penalty_points, 10)) || 5;
+    const penaltyTotal = violations * penalty;
     await cx.from('prog_game_results').update({
       violations,
-      penalty_points: parseInt((row && row.penalty_points) || 0, 10) + 1,
+      penalty_points: penaltyTotal,
       updated_at: new Date().toISOString()
     }).eq('game_id', gameId).eq('user_id', user);
     await cx.from('prog_game_players').update({

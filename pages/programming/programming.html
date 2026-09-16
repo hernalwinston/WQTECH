@@ -58,6 +58,23 @@
     </section>
   </main>
 
+  <div class="modal-overlay" id="joinModal" role="dialog" aria-modal="true" aria-label="Join live contest">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">Join Live Contest</div>
+        <button class="modal-close" onclick="closeJoinModal()" aria-label="Close">&times;</button>
+      </div>
+      <p class="prog-modal-note">Enter the 6-digit PIN your teacher shared on the live contest screen.</p>
+      <input id="joinPin" class="prog-modal-pin" maxlength="6" inputmode="numeric" autocomplete="one-time-code"
+        placeholder="Enter PIN" aria-label="Contest PIN">
+      <div class="prog-modal-error" id="joinError" style="display:none;"></div>
+      <div class="prog-modal-actions">
+        <button class="btn btn-ghost" onclick="closeJoinModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitJoin()">Join Contest</button>
+      </div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="../../js/supabase-config.js"></script>
   <script src="../../js/theme.js"></script>
@@ -83,6 +100,7 @@
       const name = (Auth.currentUser && Auth.currentUser.user_metadata && Auth.currentUser.user_metadata.name) || 'coder';
       document.getElementById('userName').textContent = name;
       document.getElementById('roleTag').style.display = IS_TEACHER ? 'inline-flex' : 'none';
+      bindJoinModal();
       buildHero();
       await renderActivities();
     });
@@ -92,10 +110,9 @@
       if (!IS_TEACHER) {
         el.innerHTML =
           '<div class="prog-join">' +
-            '<input id="livePin" class="prog-pin-input" placeholder="Enter 6-digit PIN" maxlength="6" inputmode="numeric">' +
-            '<button class="prog-btn prog-btn-lg prog-btn-primary" onclick="joinLive()">Join Live Contest</button>' +
+            '<button class="prog-btn prog-btn-lg prog-btn-primary" onclick="openJoinModal()">Join Live Contest</button>' +
           '</div>' +
-          '<p class="prog-hero-note">Or pick an activity below and start coding your solution.</p>';
+          '<p class="prog-hero-note">Your teacher will give you the 6-digit PIN. Or pick an activity below and start coding your solution.</p>';
         return;
       }
       el.innerHTML =
@@ -103,16 +120,46 @@
         '<a href="create-programming.html" class="prog-btn prog-btn-lg prog-btn-primary">+ Create Programming Activity</a>';
     }
 
-    function joinLive() {
-      const pin = document.getElementById('livePin').value.trim();
-      if (!/^\d{6}$/.test(pin)) { Utils.showToast('Enter the 6-digit PIN from your teacher', 'error'); return; }
+    // ---------- JOIN LIVE CONTEST POPUP ----------
+    function openJoinModal() {
+      document.getElementById('joinError').style.display = 'none';
+      document.getElementById('joinModal').classList.add('active');
+      const i = document.getElementById('joinPin');
+      i.value = '';
+      setTimeout(() => i.focus(), 60);
+    }
+    function closeJoinModal() {
+      document.getElementById('joinModal').classList.remove('active');
+    }
+    function joinError(msg) {
+      const e = document.getElementById('joinError');
+      e.textContent = msg;
+      e.style.display = 'block';
+      document.getElementById('joinPin').focus();
+    }
+    function submitJoin() {
+      const pin = document.getElementById('joinPin').value.trim();
+      if (!/^\d{6}$/.test(pin)) { joinError('Enter the 6-digit PIN from your teacher.'); return; }
       Utils.showLoading();
       ProgLive.getGameByPin(pin).then((g) => {
         Utils.hideLoading();
-        if (!g) { Utils.showToast('No contest found for that PIN', 'error'); return; }
-        if (g.status === 'ended') { Utils.showToast('This contest has already ended', 'error'); return; }
+        if (!g) { joinError('No live contest found for that PIN.'); return; }
+        if (g.status === 'ended') {
+          if (g.activity_id) { window.location.href = 'results.html?activity=' + encodeURIComponent(g.activity_id); return; }
+          joinError('This contest has already ended.'); return;
+        }
+        closeJoinModal();
         window.location.href = 'activity.html?live=' + encodeURIComponent(pin);
-      }).catch(() => { Utils.hideLoading(); Utils.showToast('Could not join contest', 'error'); });
+      }).catch(() => { Utils.hideLoading(); joinError('Could not join the contest right now. Try again.'); });
+    }
+    function bindJoinModal() {
+      const modal = document.getElementById('joinModal');
+      const pin = document.getElementById('joinPin');
+      pin.addEventListener('input', () => { pin.value = pin.value.replace(/\D/g, ''); });
+      pin.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submitJoin(); } });
+      pin.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeJoinModal(); });
+      modal.addEventListener('click', (e) => { if (e.target === modal) closeJoinModal(); });
+      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeJoinModal(); });
     }
 
     async function renderActivities() {
