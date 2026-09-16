@@ -1,0 +1,441 @@
+/* ============================================================
+   ADMIN DASHBOARD STYLES
+   ============================================================ */
+
+.admin-layout {
+  display: flex;
+  min-height: 100vh;
+}
+
+/* ============================================================
+   SIDEBAR
+   ============================================================ */
+.sidebar {
+  width: 260px;
+  background: var(--dark);
+  color: white;
+  padding: 0;
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100vh;
+  overflow-y: auto;
+  z-index: 100;
+  transition: var(--transition);
+}
+
+.sidebar-header {
+  padding: 25px 20px;
+  border-bottom: 1px solid rgba(255,255,255,0.1);
+  text-align: center;
+}
+
+.sidebar-header h2 {
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.sidebar-header p {
+  font-size: 0.8rem;
+  color: var(--gray);
+  margin-top: 5px;
+}
+
+.sidebar-nav {
+  padding: 15px 0;
+}
+
+.sidebar-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  color: var(--gray);
+  cursor: pointer;
+  transition: var(--transition);
+  border-left: 3px solid transparent;
+}
+
+.sidebar-nav-item:hover {
+  background: rgba(255,255,255,0.05);
+  color: white;
+}
+
+.sidebar-nav-item.active {
+  background: rgba(108, 92, 231, 0.2);
+  color: var(--primary-light);
+  border-left-color: var(--primary);
+}
+
+.sidebar-nav-item .icon {
+  font-size: 1.2rem;
+  min-width: 24px;
+  text-align: center;
+}
+
+.sidebar-nav-item .label {
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
+.sidebar-footer {
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  padding: 15px 20px;
+  border-top: 1px solid rgba(255,255,255,0.1);
+}
+
+/* ============================================================
+   MAIN CONTENT
+   ============================================================ */
+.admin-main {
+  margin-left: 260px;
+  flex: 1;
+  padding: 30px;
+  background: var(--bg);
+}
+
+.admin-content-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 30px;
+}
+
+.admin-content-header h1 {
+  font-size: 1.8rem;
+  font-weight: 700;
+}
+
+/* Tab panels */
+.tab-panel {
+  display: none;
+}
+
+.tab-panel.active {
+  display: block;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ============================================================
+   QUIZ BUILDER
+   ============================================================ */
+.quiz-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 20px;
+}
+
+.quiz-card {
+  background: white;
+  border-radius: var(--radius-lg);
+  padding: 20px;
+  box-shadow: var(--shadow);
+  transition: var(--transition);
+  cursor: pointer;
+  border: 2px solid transparent;
+}
+
+.quiz-card:hover {
+  border-color: var(--primary);
+  transform: translateY(-3px);
+  box-shadow: var(--shadow-lg);
+}
+
+.quiz-card-title {
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.quiz-card-meta {
+  font-size: 0.85rem;
+  color: var(--dark-light);
+  display: flex;
+  gap: 15px;
+  margin-bottom: 15px;
+}
+
+.quiz-card-actions {
+  display: flex;
+  gap: 10px;
+}
+
+/* Question Builder */
+.question-builder {
+  background: white;
+  border-radius: var(--radius-lg);
+  padding: 30px;
+  box-shadow: var(--shadow);
+}
+
+.question-builder-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 25px;
+}
+
+.question-item {
+  border: 2px solid var(--gray-light);
+  border-radius: var(--radius);
+  padding: 20px;
+  margin-bottom: 15px;
+  position: relative;
+}
+
+.question-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.question-item-number {
+  font-weight: 700;
+  color: var(--primary);
+}
+
+.question-item-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.option-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.option-row input[type="radio"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+}
+
+.option-row input[type="text"] {
+  flex: 1;
+  padding: 10px 15px;
+  border: 2px solid var(--gray-light);
+  border-radius: var(--radius);
+  font-size: 0.95rem;
+}
+
+.option-row input[type="text"]:focus {
+  border-color: var(--primary);
+  outline: none;
+}
+
+.media-upload {
+  border: 2px dashed var(--gray);
+  border-radius: var(--radius);
+  padding: 30px;
+  text-align: center;
+  cursor: pointer;
+  transition: var(--transition);
+  margin: 15px 0;
+}
+
+.media-upload:hover {
+  border-color: var(--primary);
+  background: rgba(108, 92, 231, 0.05);
+}
+
+.media-upload .upload-icon {
+  font-size: 2rem;
+  margin-bottom: 10px;
+}
+
+.media-upload p {
+  color: var(--dark-light);
+  font-size: 0.9rem;
+}
+
+.question-meta {
+  display: flex;
+  gap: 20px;
+  margin-top: 15px;
+}
+
+.question-meta .form-group {
+  flex: 1;
+}
+
+/* ============================================================
+   USER MANAGEMENT TABLE
+   ============================================================ */
+.user-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+}
+
+.user-table thead {
+  background: var(--primary);
+  color: white;
+}
+
+.user-table th,
+.user-table td {
+  padding: 14px 18px;
+  text-align: left;
+}
+
+.user-table tbody tr {
+  border-bottom: 1px solid var(--gray-light);
+  transition: var(--transition);
+}
+
+.user-table tbody tr:hover {
+  background: rgba(108, 92, 231, 0.05);
+}
+
+.user-avatar-cell {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.user-avatar-cell .avatar-circle {
+  width: 35px;
+  height: 35px;
+  font-size: 1.2rem;
+}
+
+/* ============================================================
+   GAME CONTROL PANEL
+   ============================================================ */
+.game-control {
+  background: white;
+  border-radius: var(--radius-lg);
+  padding: 30px;
+  box-shadow: var(--shadow);
+}
+
+.game-control-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 25px;
+}
+
+.game-status-badge {
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.game-status-badge.active {
+  background: var(--success);
+  color: white;
+}
+
+.game-status-badge.waiting {
+  background: var(--warning);
+  color: var(--dark);
+}
+
+.game-status-badge.ended {
+  background: var(--gray);
+  color: white;
+}
+
+.game-progress {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  margin: 20px 0;
+}
+
+.game-progress-bar {
+  flex: 1;
+  height: 8px;
+  background: var(--gray-light);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.game-progress-fill {
+  height: 100%;
+  background: var(--primary);
+  border-radius: 4px;
+  transition: width 0.5s ease;
+}
+
+.game-controls-row {
+  display: flex;
+  gap: 15px;
+  justify-content: center;
+  margin: 30px 0;
+}
+
+.game-answer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 15px;
+  margin-top: 20px;
+}
+
+.answer-card {
+  padding: 15px;
+  border-radius: var(--radius);
+  text-align: center;
+  transition: var(--transition);
+}
+
+.answer-card.correct {
+  background: var(--success);
+  color: white;
+}
+
+.answer-card.incorrect {
+  background: var(--danger);
+  color: white;
+}
+
+.answer-card.waiting {
+  background: var(--gray-light);
+  color: var(--dark-light);
+}
+
+/* ============================================================
+   RESPONSIVE ADMIN
+   ============================================================ */
+@media (max-width: 768px) {
+  .sidebar {
+    transform: translateX(-100%);
+  }
+
+  .sidebar.open {
+    transform: translateX(0);
+  }
+
+  .admin-main {
+    margin-left: 0;
+  }
+
+  .quiz-list {
+    grid-template-columns: 1fr;
+  }
+
+  .game-controls-row {
+    flex-wrap: wrap;
+  }
+
+  .admin-content-header {
+    flex-direction: column;
+    gap: 15px;
+    align-items: flex-start;
+  }
+}

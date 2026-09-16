@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Programming Hub - WQTech</title>
+  <link rel="stylesheet" href="../../css/main.css">
+  <link rel="stylesheet" href="../../css/programming.css">
+  <script>document.documentElement.classList.add('auth-gate');</script>
+  <style>
+    .auth-gate body { visibility: hidden; }
+  </style>
+  </head>
+<body>
+  <div id="loading-overlay"><div class="spinner"></div></div>
+
+  <nav class="navbar">
+      <a href="programming.html" class="navbar-brand">WQTech <span>Programming</span></a>
+      <div class="navbar-actions">
+        <span class="prog-role-tag" id="roleTag" style="display:none;">Teacher</span>
+        <span class="prog-user" id="userName"></span>
+        <a href="../dashboard.html" class="btn btn-ghost btn-sm">Dashboard</a>
+        <a href="../game.html" class="btn btn-ghost btn-sm">Quiz</a>
+        <button class="theme-toggle" onclick="Theme.toggle()" aria-label="Toggle theme">
+        <div class="knob">
+          <svg class="icon-sun" viewBox="0 0 24 24" fill="none" stroke="#F59E0B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+          <svg class="icon-moon" viewBox="0 0 24 24" fill="none" stroke="#818CF8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </div>
+      </button>
+        <button class="btn btn-ghost btn-sm" onclick="logout()">Logout</button>
+      </div>
+    </nav>
+
+  <main class="prog-page">
+    <header class="prog-hero">
+      <div>
+        <h1>Programming Hub</h1>
+        <p>Solve coding problems, one test case at a time.</p>
+      </div>
+      <div id="heroActions"></div>
+    </header>
+
+    <section>
+      <div class="prog-section-head">
+        <h2>Activities</h2>
+        <span class="prog-chip" id="activityCount">Loading&hellip;</span>
+      </div>
+
+      <div id="activitiesGrid" class="prog-grid"></div>
+
+      <div id="emptyState" style="display:none;">
+        <div class="prog-empty">
+          <div class="prog-empty-icon">&lt;/&gt;</div>
+          <p id="emptyMsg">No programming activities yet.</p>
+          <div class="prog-cta" id="emptyCta"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script src="../../js/supabase-config.js"></script>
+  <script src="../../js/theme.js"></script>
+  <script src="../../js/utils.js"></script>
+  <script src="../../js/auth.js"></script>
+  <script src="../../js/programming-shared.js"></script>
+  <script src="../../js/programming-live.js"></script>
+
+  <script>
+    // ============================================================
+    // PROGRAMMING HUB | dashboard (auth gate -> activities -> cards)
+    // ============================================================
+
+    let IS_TEACHER = false;
+    let UID = '';
+
+    document.addEventListener('DOMContentLoaded', async () => {
+      const user = await Auth.init();
+      if (!user) { window.location.href = '../index.html'; return; }
+      UID = Programming.uid();
+      IS_TEACHER = await Programming.isTeacher();
+      document.documentElement.classList.remove('auth-gate');
+      const name = (Auth.currentUser && Auth.currentUser.user_metadata && Auth.currentUser.user_metadata.name) || 'coder';
+      document.getElementById('userName').textContent = name;
+      document.getElementById('roleTag').style.display = IS_TEACHER ? 'inline-flex' : 'none';
+      buildHero();
+      await renderActivities();
+    });
+
+    function buildHero() {
+      const el = document.getElementById('heroActions');
+      if (!IS_TEACHER) {
+        el.innerHTML =
+          '<div class="prog-join">' +
+            '<input id="livePin" class="prog-pin-input" placeholder="Enter 6-digit PIN" maxlength="6" inputmode="numeric">' +
+            '<button class="prog-btn prog-btn-lg prog-btn-primary" onclick="joinLive()">Join Live Contest</button>' +
+          '</div>' +
+          '<p class="prog-hero-note">Or pick an activity below and start coding your solution.</p>';
+        return;
+      }
+      el.innerHTML =
+        '<a href="live.html" class="prog-btn prog-btn-lg prog-btn-host">Host Live Contest</a>' +
+        '<a href="create-programming.html" class="prog-btn prog-btn-lg prog-btn-primary">+ Create Programming Activity</a>';
+    }
+
+    function joinLive() {
+      const pin = document.getElementById('livePin').value.trim();
+      if (!/^\d{6}$/.test(pin)) { Utils.showToast('Enter the 6-digit PIN from your teacher', 'error'); return; }
+      Utils.showLoading();
+      ProgLive.getGameByPin(pin).then((g) => {
+        Utils.hideLoading();
+        if (!g) { Utils.showToast('No contest found for that PIN', 'error'); return; }
+        if (g.status === 'ended') { Utils.showToast('This contest has already ended', 'error'); return; }
+        window.location.href = 'activity.html?live=' + encodeURIComponent(pin);
+      }).catch(() => { Utils.hideLoading(); Utils.showToast('Could not join contest', 'error'); });
+    }
+
+    async function renderActivities() {
+      const grid = document.getElementById('activitiesGrid');
+      const count = document.getElementById('activityCount');
+      const empty = document.getElementById('emptyState');
+      try {
+        const all = await Programming.listActivities();
+        const acts = all.filter(a => IS_TEACHER ? (a.created_by === UID || a.status === 'published') : a.status === 'published');
+        acts.sort((a, b) => (a.status === 'draft' ? 1 : 0) - (b.status === 'draft' ? 1 : 0));
+        const withCounts = await Promise.all(acts.map(async a => {
+          let n = 0;
+          try { n = (await Programming.loadActivity(a.id)).problems.length; } catch (e) {}
+          return Object.assign({}, a, { _count: n });
+        }));
+        count.textContent = withCounts.length + ' activit' + (withCounts.length === 1 ? 'y' : 'ies');
+        if (!withCounts.length) {
+          grid.innerHTML = '';
+          empty.style.display = 'block';
+          fillEmpty();
+          return;
+        }
+        empty.style.display = 'none';
+        grid.innerHTML = withCounts.map(cardHTML).join('');
+      } catch (e) {
+        console.error(e);
+        Utils.showToast('Could not load activities', 'error');
+        grid.innerHTML = '';
+        empty.style.display = 'block';
+        fillEmpty();
+      }
+    }
+
+    function fillEmpty() {
+      const msg = document.getElementById('emptyMsg');
+      const cta = document.getElementById('emptyCta');
+      if (IS_TEACHER) {
+        msg.textContent = 'No programming activities yet. Create the first one for your class.';
+        cta.innerHTML = '<a href="create-programming.html" class="prog-btn prog-btn-primary">+ Create Programming Activity</a>';
+      } else {
+        msg.textContent = 'No published activities yet. Check back soon!';
+        cta.innerHTML = '';
+      }
+    }
+
+    function cardHTML(a) {
+      const mine = a.created_by === UID;
+      const statusPill = '<span class="prog-status-badge ' + a.status + '">' + (a.status === 'published' ? 'Published' : 'Draft') + '</span>';
+      let actions = '';
+      if (IS_TEACHER) {
+        actions += '<a class="prog-btn prog-btn-outline prog-btn-sm" href="activity.html?id=' + a.id + '">Open</a>';
+        actions += '<a class="prog-btn prog-btn-ghost prog-btn-sm" href="results.html?activity=' + a.id + '">Results</a>';
+        if (mine) {
+          actions += '<a class="prog-btn prog-btn-ghost prog-btn-sm" href="create-programming.html?id=' + a.id + '">Edit</a>';
+          actions += '<button class="prog-btn prog-btn-danger prog-btn-sm" onclick="delActivity(\'' + a.id + '\')">Delete</button>';
+        }
+      } else {
+        actions = '<a class="prog-btn prog-btn-success prog-btn-sm" href="activity.html?id=' + a.id + '">Start Activity</a>';
+      }
+      const lang = langLabel(a.language);
+      return '<div class="prog-card">' +
+        '<div class="prog-card-top">' + langBadge(lang) + statusPill + '</div>' +
+        '<h3 class="prog-card-title">' + Utils.sanitize(a.title) + '</h3>' +
+        '<p class="prog-card-desc">' + Utils.sanitize(a.description || 'No description yet.') + '</p>' +
+        '<div class="prog-card-meta">' + a._count + ' problem' + (a._count === 1 ? '' : 's') + ' &middot; ' + (a.total_points || 0) + ' pts &middot; ' + a.time_limit_minutes + ' min</div>' +
+        '<div class="prog-card-actions">' + actions + '</div>' +
+        '</div>';
+    }
+
+    function langLabel(lang) {
+      const hit = Programming.LANGUAGES.find(l => l.id === lang || l.label === lang);
+      return hit ? hit.label : (lang || 'C++');
+    }
+
+    function langBadge(label) {
+      return '<span class="prog-lang-badge">&lt;' + Utils.sanitize(label) + '/&gt;</span>';
+    }
+
+    async function delActivity(id) {
+      const list = await Programming.listActivities();
+      const act = list.find(a => a.id === id);
+      if (!act || act.created_by !== UID) { Utils.showToast('You can only delete activities you created', 'error'); return; }
+      if (!window.confirm('Delete this activity, all its problems, test cases and results?')) return;
+      try {
+        await supabaseClient.from('programming_activities').delete().eq('id', id);
+        Utils.showToast('Activity deleted', 'success');
+        await renderActivities();
+      } catch (e) {
+        console.error(e);
+        Utils.showToast('Could not delete activity', 'error');
+      }
+    }
+
+    async function logout() { await Auth.logout(); window.location.href = '../index.html'; }
+  </script>
+</body>
+</html>
