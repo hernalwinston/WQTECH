@@ -88,7 +88,9 @@
     .pa-empty { color: var(--text-muted); font-size: 0.85rem; margin: 0; font-style: italic; }
 
     .pa-editor { background: #12131A; border: 1px solid #26283A; border-radius: var(--radius-lg); overflow: hidden; box-shadow: var(--shadow); }
-    .pa-editor-head { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-bottom: 1px solid #26283A; background: #0E0F15; }
+    .pa-editor-head { display: flex; align-items: center; gap: 10px; padding: 9px 14px; border-bottom: 1px solid #26283A; background: #0E0F15; flex-wrap: wrap; row-gap: 6px; }
+    .pa-head-btn { padding: 7px 14px !important; font-size: 0.82rem !important; }
+    .pa-editor-head .pa-save { margin-right: 6px; }
     .pa-dots { display: flex; gap: 6px; }
     .pa-dots i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
     .pa-dots i:nth-child(1) { background: #FF5F57; } .pa-dots i:nth-child(2) { background: #FEBC2E; } .pa-dots i:nth-child(3) { background: #28C840; }
@@ -141,19 +143,17 @@
     .pa-con.warn { color: #B45309; } [data-theme="dark"] .pa-con.warn { color: #FBBF24; }
     .pa-con.muted { color: var(--text-muted); }
     .pa-con-time { color: var(--text-muted); font-size: 0.76rem; }
-    .pa-con-input { border-bottom: 1px solid var(--card-border); background: var(--bg-secondary); padding: 10px 14px 12px; }
-    .pa-con-input label { display: block; font-size: 0.7rem; font-weight: 800; letter-spacing: 0.9px; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 8px; }
-    .pa-stdin { width: 100%; box-sizing: border-box; background: var(--bg); color: var(--text);
-      border: 1px solid var(--card-border); border-radius: 10px; padding: 10px 12px;
+    .pa-stdin { width: 100%; box-sizing: border-box; background: var(--bg-secondary); color: var(--text);
+      border: none; border-bottom: 1px solid var(--card-border); border-radius: 0; padding: 10px 14px;
       font-family: 'SFMono-Regular', Consolas, 'Cascadia Mono', monospace; font-size: 0.85rem; line-height: 1.5;
       resize: vertical; outline: none; }
-    .pa-stdin:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99,102,241,0.12); }
+    .pa-stdin:focus { border-bottom-color: var(--accent); background: var(--bg); }
     .pa-run-ico { width: 15px; height: 15px; display: inline-block; vertical-align: -2px; margin-right: 6px; }
     #btnRun { display: inline-flex; align-items: center; }
 
     .pa-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .pa-actions .pa-flex { flex: 1; }
-    .pa-actions .btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; }
+    .btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; border: 1px solid var(--card-border); }
     .pa-btn-submit { background: linear-gradient(135deg, #4F46E5, #7C3AED); color: #fff; }
     .pa-btn-submit:hover { background: linear-gradient(135deg, #4338CA, #6D28D9); }
     [data-theme="dark"] .pa-btn-submit { background: linear-gradient(135deg, #6366F1, #8B5CF6); }
@@ -227,6 +227,9 @@
     .pa-wcard h2 { margin: 0 0 8px; font-size: 1.3rem; font-weight: 800; }
     .pa-wcard .pa-wpin { font-size: 2.4rem; font-weight: 800; letter-spacing: 10px; color: var(--accent); margin: 10px 0 6px; font-variant-numeric: tabular-nums; }
     .pa-wcard p { color: var(--text-muted); font-size: 0.9rem; margin: 0 0 18px; }
+    .pa-wrules { text-align: left; margin: 0 0 22px; display: flex; flex-direction: column; gap: 9px; }
+    .pa-wrule { display: flex; gap: 10px; align-items: flex-start; font-size: 0.84rem; color: var(--text-secondary); line-height: 1.45; }
+    .pa-wrule .pa-wr-n { flex: 0 0 22px; height: 22px; border-radius: 50%; background: rgba(99,102,241,0.12); color: #818CF8; font-weight: 800; font-size: 0.76rem; display: inline-flex; align-items: center; justify-content: center; }
 
     @media (max-width: 1180px) {
       .pa-main { grid-template-columns: 220px minmax(0, 1fr); }
@@ -289,7 +292,10 @@
             <span class="pa-editor-lang" id="editorLangChip">CODE</span>
             <span class="pa-editor-spacer"></span>
             <span class="pa-save" id="saveStatus">Not started</span>
-            <span class="pa-cursor" id="cursorPos">Ln 1, Col 1</span>
+            <button class="btn btn-ghost pa-head-btn" onclick="submitAll()" id="btnSubmitBottom">Finish &amp; Submit</button>
+            <button class="btn btn-primary pa-head-btn" id="btnRun" onclick="runCode()">
+              <svg class="pa-run-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg> Run
+            </button>
           </div>
           <div class="pa-editor-body">
             <div class="pa-gutter" id="gutterWrap"><div class="pa-gutter-lines" id="gutterLines"></div></div>
@@ -301,39 +307,19 @@
 
         <div class="pa-console">
           <div class="pa-console-head"><span>Console</span><span class="pa-con-hint" id="consoleHint"></span></div>
-          <div class="pa-con-input">
-            <label for="stdinInput">Standard Input (stdin)</label>
-            <textarea class="pa-stdin" id="stdinInput" rows="3" spellcheck="false" placeholder="Type your program input here (cin / scanf / input())…"></textarea>
-          </div>
+          <textarea class="pa-stdin" id="stdinInput" rows="3" spellcheck="false" placeholder="Type the input your program needs here (cin / scanf / input())…"></textarea>
           <pre class="pa-console-out" id="consoleOut"></pre>
-        </div>
-
-        <div class="pa-actions">
-          <button class="btn btn-primary" id="btnRun" onclick="runCode()">
-            <svg class="pa-run-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg> Run
-          </button>
-          <span class="pa-flex"></span>
-          <button class="btn pa-btn-submit" onclick="submitAll()" id="btnSubmitBottom">Finish &amp; Submit</button>
         </div>
       </section>
 
       <aside class="pa-rightcol">
-        <div class="pa-card pa-rules">
-          <h3>Fair Play Rules</h3>
-          <div class="pa-rule"><span class="pa-rule-n">1</span><span>Stay in <b>fullscreen</b> for the whole session.</span></div>
-          <div class="pa-rule"><span class="pa-rule-n">2</span><span>Do not <b>switch tabs</b>, minimize, or open another window.</span></div>
-          <div class="pa-rule"><span class="pa-rule-n">3</span><span>Every violation subtracts <b id="penaltyNote">5 pts</b> from your score.</span></div>
-          <div class="pa-rule"><span class="pa-rule-n">4</span><span>After <b id="maxViolNote">3 violations</b> you are locked out and auto-submitted.</span></div>
-          <div class="pa-rule"><span class="pa-rule-n">5</span><span>Outside help or sharing answers is <b>not allowed</b>.</span></div>
-          <div class="pa-violbox"><span>Violations</span><span class="pa-vn" id="violCount">0<span style="font-size:0.8rem;opacity:0.7;"> / <span id="violMax">3</span></span></span></div>
-        </div>
-
         <div class="pa-card" id="liveCard" style="display:none;">
           <h3>Live Contest</h3>
           <div class="pa-live-status" id="liveStatus">Waiting</div>
           <div class="pa-live-row"><span>My score</span><b id="liveScore">0</b></div>
           <div class="pa-live-row"><span>Problems solved</span><b id="liveSolved">0</b></div>
           <div class="pa-live-row"><span>Rule penalties</span><b id="livePenalty">0</b></div>
+          <div class="pa-live-row"><span>Violations</span><b id="violCountLive">0 / 3</b></div>
         </div>
 
         <div class="pa-card" id="progCard">
@@ -350,7 +336,14 @@
     <div class="pa-lock-card pa-wcard">
       <h2>You joined the contest!</h2>
       <div class="pa-wpin" id="waitingPin">••••••</div>
-      <p id="waitingText">Waiting for the host to start the countdown. Stay on this screen.</p>
+      <p id="waitingText">Waiting for the host to start the countdown. Read the Fair Play Rules while you wait.</p>
+      <div class="pa-wrules">
+        <div class="pa-wrule"><span class="pa-wr-n">1</span><span>Stay in <b>fullscreen</b> for the whole session.</span></div>
+        <div class="pa-wrule"><span class="pa-wr-n">2</span><span>Do not <b>switch tabs</b>, minimize, or open another window.</span></div>
+        <div class="pa-wrule"><span class="pa-wr-n">3</span><span>Every violation subtracts <b id="penaltyNote">5 pts</b> from your score.</span></div>
+        <div class="pa-wrule"><span class="pa-wr-n">4</span><span>After <b id="maxViolNote">3 violations</b> you are locked out and auto-submitted.</span></div>
+        <div class="pa-wrule"><span class="pa-wr-n">5</span><span>Outside help or sharing answers is <b>not allowed</b>.</span></div>
+      </div>
       <div class="pa-timer idle" style="justify-content:center;"><span>--:--</span></div>
     </div>
   </div>
@@ -480,6 +473,8 @@
       $('violMax').textContent = maxViolations();
       $('penaltyNote').textContent = penaltyPerViolation() + ' pts';
       $('maxViolNote').textContent = maxViolations() + ' violations';
+      const vcLive = $('violCountLive');
+      if (vcLive && vcLive.textContent !== undefined) vcLive.textContent = VIOLATIONS + ' / ' + maxViolations();
       if (LIVE) {
         $('livePenalty').textContent = '-' + (VIOLATIONS * penaltyPerViolation());
         if ($('liveScore')) $('liveScore').textContent = currentGrossScore() - (VIOLATIONS * penaltyPerViolation());
