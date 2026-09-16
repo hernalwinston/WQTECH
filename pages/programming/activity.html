@@ -143,11 +143,15 @@
     .pa-con.warn { color: #B45309; } [data-theme="dark"] .pa-con.warn { color: #FBBF24; }
     .pa-con.muted { color: var(--text-muted); }
     .pa-con-time { color: var(--text-muted); font-size: 0.76rem; }
-    .pa-stdin { width: 100%; box-sizing: border-box; background: var(--bg-secondary); color: var(--text);
-      border: none; border-bottom: 1px solid var(--card-border); border-radius: 0; padding: 10px 14px;
-      font-family: 'SFMono-Regular', Consolas, 'Cascadia Mono', monospace; font-size: 0.85rem; line-height: 1.5;
-      resize: vertical; outline: none; }
-    .pa-stdin:focus { border-bottom-color: var(--accent); background: var(--bg); }
+    .pa-con-term { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--card-border); background: var(--bg-secondary); }
+    .pa-con-term .pa-caret { font-weight: 800; color: var(--accent); font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.85rem; user-select: none; }
+    .pa-term-in { flex: 1; background: transparent; border: none; outline: none; resize: none; overflow: hidden;
+      color: var(--text); font-family: 'SFMono-Regular', Consolas, 'Cascadia Mono', monospace; font-size: 0.85rem; line-height: 1.5;
+      caret-color: #818CF8; }
+    .pa-term-in::placeholder { color: #5A5F76; font-style: italic; }
+    .pa-term-send { flex: 0 0 30px; width: 30px; height: 30px; background: var(--accent); color: #fff;
+      border: none; border-radius: 8px; font-size: 1rem; line-height: 1; cursor: pointer; font-family: inherit; }
+    .pa-term-send:hover { background: #7C86F5; }
     .pa-run-ico { width: 15px; height: 15px; display: inline-block; vertical-align: -2px; margin-right: 6px; }
     #btnRun { display: inline-flex; align-items: center; }
 
@@ -307,8 +311,12 @@
 
         <div class="pa-console">
           <div class="pa-console-head"><span>Console</span><span class="pa-con-hint" id="consoleHint"></span></div>
-          <textarea class="pa-stdin" id="stdinInput" rows="3" spellcheck="false" placeholder="Type the input your program needs here (cin / scanf / input())…"></textarea>
           <pre class="pa-console-out" id="consoleOut"></pre>
+          <div class="pa-con-term">
+            <span class="pa-caret">&gt;</span>
+            <textarea class="pa-term-in" id="termInput" rows="1" spellcheck="false" placeholder="Type program input, then press Enter to run…"></textarea>
+            <button class="pa-term-send" id="btnSend" title="Run with input (Enter)" onclick="runCode()">&#9166;</button>
+          </div>
         </div>
       </section>
 
@@ -435,7 +443,7 @@
       if (!lastBest[p.id] || (report.score || 0) > (lastBest[p.id].score || 0)) lastBest[p.id] = report;
     }
     function setBusy(b) {
-      ['btnRun', 'btnSubmit', 'btnSubmitBottom', 'stdinInput'].forEach(id => { const el = $(id); if (el) el.disabled = b; });
+      ['btnRun', 'btnSubmit', 'btnSubmitBottom', 'termInput', 'btnSend'].forEach(id => { const el = $(id); if (el) el.disabled = b; });
     }
     function setProgress(text) { $('consoleOut').innerHTML = '<div class="pa-con muted">' + Utils.sanitize(text) + '</div>'; }
     function appendConsole(text, cls) {
@@ -567,9 +575,12 @@
       try {
         const vis = await Programming.getVisibleTestCases(p.id);
         sampleInputs[p.id] = (vis.sample && vis.sample.length) ? (vis.sample[0].input || '') : '';
-        const st = $('stdinInput');
-        if (st) st.value = sampleInputs[p.id] || '';
-        $('consoleHint').textContent = vis.sample && vis.sample.length ? 'stdin: Sample 1 input (editable)' : 'stdin: none';
+        const st = $('termInput');
+        if (st) {
+          st.value = sampleInputs[p.id] || '';
+          autoGrowTermInput();
+        }
+        $('consoleHint').textContent = vis.sample && vis.sample.length ? 'Sample 1 input loaded — edit it, press Enter' : 'Type input, press Enter';
         if (!vis.sample || !vis.sample.length) { list.innerHTML = '<p class="pa-empty">No sample cases provided for this problem.</p>'; return; }
         list.innerHTML = vis.sample.map((t, i) =>
           '<div class="pa-sample"><div class="pa-sample-h">Sample ' + (i + 1) + '</div><div class="pa-sample-b">' +
@@ -718,6 +729,17 @@
         }
         if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); manualSave(); }
       });
+      const ti = $('termInput');
+      ti.addEventListener('input', autoGrowTermInput);
+      ti.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey && !checkingAll) { e.preventDefault(); runCode(); }
+      });
+    }
+    function autoGrowTermInput() {
+      const t = $('termInput');
+      if (!t || !t.style) return;
+      t.style.height = 'auto';
+      t.style.height = Math.min(t.scrollHeight, 120) + 'px';
     }
     async function loadRemote(p) {
       try {
@@ -771,8 +793,8 @@
       setBusy(true);
       $('btnRun').innerHTML = RUN_HTML + 'Running…';
       resetConsole();
-      const stdin = $('stdinInput').value || '';
-      appendConsole('>>> Running your code' + (stdin ? ' with your input' : '') + '…', 'muted');
+      const stdin = $('termInput').value || '';
+      appendConsole('>>> Running your code' + (stdin ? ' with input: ' + stdin.replace(/\s+/g, ' ') : '') + '…', 'muted');
       try {
         await Programming.saveCode(ACTIVITY_ID, p.id, RUN_LANG, src);
         lastSavedAt = Date.now(); updateSaveStatus();
@@ -796,6 +818,7 @@
       }
       setBusy(false);
       $('btnRun').innerHTML = RUN_HTML + ' Run';
+      try { $('termInput').focus(); } catch (e) {}
     }
 
     // ---------- CHECK / GRADE ----------
@@ -1101,6 +1124,7 @@
         syncGutter(); updateCursor(); renderHighlight();
         await loadSamples(PROBLEMS[0]);
         refreshProgressCard();
+        try { $('termInput').focus(); } catch (e) {}
 
         if (LIVE) {
           if (LIVE_GAME && typeof supabaseClient.channel === 'function') {
