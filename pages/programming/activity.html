@@ -141,6 +141,15 @@
     .pa-con.warn { color: #B45309; } [data-theme="dark"] .pa-con.warn { color: #FBBF24; }
     .pa-con.muted { color: var(--text-muted); }
     .pa-con-time { color: var(--text-muted); font-size: 0.76rem; }
+    .pa-con-input { border-bottom: 1px solid var(--card-border); background: var(--bg-secondary); padding: 10px 14px 12px; }
+    .pa-con-input label { display: block; font-size: 0.7rem; font-weight: 800; letter-spacing: 0.9px; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 8px; }
+    .pa-stdin { width: 100%; box-sizing: border-box; background: var(--bg); color: var(--text);
+      border: 1px solid var(--card-border); border-radius: 10px; padding: 10px 12px;
+      font-family: 'SFMono-Regular', Consolas, 'Cascadia Mono', monospace; font-size: 0.85rem; line-height: 1.5;
+      resize: vertical; outline: none; }
+    .pa-stdin:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(99,102,241,0.12); }
+    .pa-run-ico { width: 15px; height: 15px; display: inline-block; vertical-align: -2px; margin-right: 6px; }
+    #btnRun { display: inline-flex; align-items: center; }
 
     .pa-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     .pa-actions .pa-flex { flex: 1; }
@@ -292,13 +301,17 @@
 
         <div class="pa-console">
           <div class="pa-console-head"><span>Console</span><span class="pa-con-hint" id="consoleHint"></span></div>
+          <div class="pa-con-input">
+            <label for="stdinInput">Standard Input (stdin)</label>
+            <textarea class="pa-stdin" id="stdinInput" rows="3" spellcheck="false" placeholder="Type your program input here (cin / scanf / input())…"></textarea>
+          </div>
           <pre class="pa-console-out" id="consoleOut"></pre>
         </div>
 
         <div class="pa-actions">
-          <button class="btn btn-primary" id="btnRun" onclick="runCode()">Run Code</button>
-          <button class="btn" id="btnCheck" onclick="checkCodeNow()">Check Code</button>
-          <button class="btn btn-ghost" id="btnSave" onclick="manualSave()">Save Code</button>
+          <button class="btn btn-primary" id="btnRun" onclick="runCode()">
+            <svg class="pa-run-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg> Run
+          </button>
           <span class="pa-flex"></span>
           <button class="btn pa-btn-submit" onclick="submitAll()" id="btnSubmitBottom">Finish &amp; Submit</button>
         </div>
@@ -429,7 +442,7 @@
       if (!lastBest[p.id] || (report.score || 0) > (lastBest[p.id].score || 0)) lastBest[p.id] = report;
     }
     function setBusy(b) {
-      ['btnRun', 'btnCheck', 'btnSave', 'btnSubmit', 'btnSubmitBottom'].forEach(id => { const el = $(id); if (el) el.disabled = b; });
+      ['btnRun', 'btnSubmit', 'btnSubmitBottom', 'stdinInput'].forEach(id => { const el = $(id); if (el) el.disabled = b; });
     }
     function setProgress(text) { $('consoleOut').innerHTML = '<div class="pa-con muted">' + Utils.sanitize(text) + '</div>'; }
     function appendConsole(text, cls) {
@@ -559,7 +572,9 @@
       try {
         const vis = await Programming.getVisibleTestCases(p.id);
         sampleInputs[p.id] = (vis.sample && vis.sample.length) ? (vis.sample[0].input || '') : '';
-        $('consoleHint').textContent = vis.sample && vis.sample.length ? 'stdin: Sample 1 input' : 'stdin: none';
+        const st = $('stdinInput');
+        if (st) st.value = sampleInputs[p.id] || '';
+        $('consoleHint').textContent = vis.sample && vis.sample.length ? 'stdin: Sample 1 input (editable)' : 'stdin: none';
         if (!vis.sample || !vis.sample.length) { list.innerHTML = '<p class="pa-empty">No sample cases provided for this problem.</p>'; return; }
         list.innerHTML = vis.sample.map((t, i) =>
           '<div class="pa-sample"><div class="pa-sample-h">Sample ' + (i + 1) + '</div><div class="pa-sample-b">' +
@@ -751,23 +766,41 @@
       if (!failed && !res.stdout && !res.stderr && !res.compile_error) appendConsole('Run finished with no output.', 'muted');
       if (typeof res.time_ms === 'number') appendConsole('Execution time: ' + res.time_ms + ' ms', 'time pa-con-time');
     }
+    const RUN_HTML = '<svg class="pa-run-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
     async function runCode() {
       const p = PROBLEMS[CURRENT];
-      if (!p || checkingAll || $('btnRun').disabled) return;
+      if (!p || checkingAll || LOCKED_OUT || finalized || $('btnRun').disabled) return;
       const src = getEditorValue();
+      if (!src || !src.trim()) { Utils.showToast('Write some code first', 'error'); return; }
       currentCodeByProblem[p.id] = src;
-      $('btnRun').disabled = true;
-      $('btnRun').innerHTML = 'Running…';
+      setBusy(true);
+      $('btnRun').innerHTML = RUN_HTML + 'Running…';
       resetConsole();
-      appendConsole('>>> Running in sandbox' + (sampleInputs[p.id] ? ' with Sample 1 input' : '') + '…', 'muted');
+      const stdin = $('stdinInput').value || '';
+      appendConsole('>>> Running your code' + (stdin ? ' with your input' : '') + '…', 'muted');
       try {
-        const res = await Programming.runInSandbox({ language: RUN_LANG, source: src, stdin: sampleInputs[p.id] || '', timeoutMs: 4000 });
-        renderRunResult(res);
+        await Programming.saveCode(ACTIVITY_ID, p.id, RUN_LANG, src);
+        lastSavedAt = Date.now(); updateSaveStatus();
       } catch (e) {
-        appendConsole('Runner unavailable: ' + (e.message || 'could not reach the grader service'), 'err');
+        try { scheduleSave(); } catch (e2) { updateSaveStatus('error'); }
       }
-      $('btnRun').disabled = false;
-      $('btnRun').innerHTML = 'Run Code';
+      try {
+        const res = await Programming.runInSandbox({ language: RUN_LANG, source: src, stdin, timeoutMs: 4000 });
+        renderRunResult(res);
+        if (finalized) return;
+        appendConsole('-- checking against test cases --', 'muted');
+        const report = await Programming.checkCode({ activityId: ACTIVITY_ID, problem: p, source: src, language: RUN_LANG });
+        rememberBest(p, report);
+        const st = STATUS_MAP[report.status] || STATUS_MAP.pending;
+        const pts = report.score || 0;
+        appendConsole((pts > 0 ? '✔ ' : '✖ ') + st.t + ' — ' + report.score + ' / ' + report.max_score + ' pts earned', pts > 0 ? 'ok' : 'err');
+        refreshProgressCard();
+        if (LIVE) await pushLiveScore();
+      } catch (e) {
+        appendConsole('Could not run or grade: ' + (e.message || 'unknown error'), 'err');
+      }
+      setBusy(false);
+      $('btnRun').innerHTML = RUN_HTML + ' Run';
     }
 
     // ---------- CHECK / GRADE ----------
@@ -837,31 +870,6 @@
       $('progSolved').textContent = currentSolved() + ' / ' + PROBLEMS.length;
       $('progScore').textContent = currentGrossScore() - (VIOLATIONS * penaltyPerViolation()) + ' pts';
       renderProblemList();
-    }
-    async function checkCodeNow() {
-      const p = PROBLEMS[CURRENT];
-      if (!p || checkingAll || $('btnCheck').disabled) return;
-      $('btnCheck').disabled = true;
-      resetConsole();
-      appendConsole('>>> Running every test case (sample + hidden)…', 'muted');
-      try {
-        const src = getEditorValue();
-        currentCodeByProblem[p.id] = src;
-        await Programming.saveCode(ACTIVITY_ID, p.id, RUN_LANG, src);
-        lastSavedAt = Date.now(); updateSaveStatus();
-        const report = await Programming.checkCode({ activityId: ACTIVITY_ID, problem: p, source: src, language: RUN_LANG });
-        rememberBest(p, report);
-        openGradeOverlay(p, report);
-        const st = STATUS_MAP[report.status] || STATUS_MAP.pending;
-        appendConsole('Checked: ' + st.t + ' — ' + report.score + ' / ' + report.max_score + ' pts', report.status === 'accepted' ? 'ok' : 'warn');
-        refreshProgressCard();
-        await pushLiveScore();
-      } catch (e) {
-        console.error(e);
-        appendConsole('Could not check code: ' + (e.message || 'unknown error'), 'err');
-        Utils.showToast('Could not reach the checker', 'error');
-      }
-      $('btnCheck').disabled = false;
     }
 
     // ---------- SUBMIT / FINALIZE ----------
