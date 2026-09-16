@@ -142,9 +142,13 @@
     .pa-con.err { color: #DC2626; } [data-theme="dark"] .pa-con.err { color: #F87171; }
     .pa-con.warn { color: #B45309; } [data-theme="dark"] .pa-con.warn { color: #FBBF24; }
     .pa-con.muted { color: var(--text-muted); }
-    .pa-con-time { color: var(--text-muted); font-size: 0.76rem; }
+    .pa-con.in { color: #22D3EE; }
+    .pa-con.time { color: var(--text-muted); font-size: 0.76rem; }
     .pa-con-term { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--card-border); background: var(--bg-secondary); }
     .pa-con-term .pa-caret { font-weight: 800; color: var(--accent); font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.85rem; user-select: none; }
+    .pa-con-term .pa-caret::after { content: ''; display: inline-block; width: 7px; height: 15px; margin-left: 1px;
+      background: #818CF8; vertical-align: -2px; animation: pa-blink 1.1s steps(2, start) infinite; }
+    @keyframes pa-blink { to { visibility: hidden; } }
     .pa-term-in { flex: 1; background: transparent; border: none; outline: none; resize: none; overflow: hidden;
       color: var(--text); font-family: 'SFMono-Regular', Consolas, 'Cascadia Mono', monospace; font-size: 0.85rem; line-height: 1.5;
       caret-color: #818CF8; }
@@ -314,7 +318,7 @@
           <pre class="pa-console-out" id="consoleOut"></pre>
           <div class="pa-con-term">
             <span class="pa-caret">&gt;</span>
-            <textarea class="pa-term-in" id="termInput" rows="1" spellcheck="false" placeholder="Type program input, then press Enter to run…"></textarea>
+            <textarea class="pa-term-in" id="termInput" rows="1" spellcheck="false" placeholder="Type program input, then press Enter to run (Shift+Enter for a new line)…"></textarea>
             <button class="pa-term-send" id="btnSend" title="Run with input (Enter)" onclick="runCode()">&#9166;</button>
           </div>
         </div>
@@ -732,7 +736,9 @@
       const ti = $('termInput');
       ti.addEventListener('input', autoGrowTermInput);
       ti.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey && !checkingAll) { e.preventDefault(); runCode(); }
+        if (!checkingAll && ((e.key === 'Enter' && !e.shiftKey) || ((e.ctrlKey || e.metaKey) && e.key === 'Enter'))) {
+          e.preventDefault(); runCode();
+        }
       });
     }
     function autoGrowTermInput() {
@@ -794,7 +800,10 @@
       $('btnRun').innerHTML = RUN_HTML + 'Running…';
       resetConsole();
       const stdin = $('termInput').value || '';
-      appendConsole('>>> Running your code' + (stdin ? ' with input: ' + stdin.replace(/\s+/g, ' ') : '') + '…', 'muted');
+      if (stdin) {
+        stdin.split(/\r?\n/).forEach(l => { if (l.trim() !== '' || l !== '') appendConsole('> ' + l, 'in'); });
+      }
+      appendConsole('── OUTPUT ───────────────', 'muted');
       try {
         await Programming.saveCode(ACTIVITY_ID, p.id, RUN_LANG, src);
         lastSavedAt = Date.now(); updateSaveStatus();
