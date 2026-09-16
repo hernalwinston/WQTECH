@@ -9,12 +9,43 @@
   <script>document.documentElement.classList.add('auth-gate');</script>
   <style>
     .auth-gate body { visibility: hidden; }
+    .prog-page { min-height: 100vh; background: var(--bg); }
+    .prog-content { max-width: 860px; margin: 0 auto; padding: 32px 20px; }
+    .prog-profile-card {
+      background: var(--card); border: 1px solid var(--card-border);
+      border-radius: var(--radius-xl); padding: 32px;
+      display: flex; align-items: center; gap: 24px;
+      margin-bottom: 28px; box-shadow: var(--shadow);
+    }
+    .prog-profile-avatar {
+      width: 64px; height: 64px; border-radius: 50%;
+      background: var(--accent-light);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.6rem; font-weight: 800; color: var(--accent); flex-shrink: 0;
+    }
+    .prog-profile-info h2 { font-size: 1.3rem; font-weight: 700; margin-bottom: 2px; }
+    .prog-profile-info p { color: var(--text-secondary); font-size: 0.9rem; }
+    .prog-join-card {
+      background: var(--card); border: 1px solid var(--card-border);
+      border-radius: var(--radius-xl); padding: 36px;
+      text-align: center; box-shadow: var(--shadow); margin-bottom: 28px;
+    }
+    .prog-join-card h3 { margin-bottom: 12px; font-weight: 700; }
+    .prog-join-card p { color: var(--text-secondary); margin-bottom: 24px; }
+    .prog-activities-section {
+      background: var(--card); border: 1px solid var(--card-border);
+      border-radius: var(--radius-xl); padding: 24px;
+      box-shadow: var(--shadow);
+    }
+    .prog-activities-section h3 { margin-bottom: 16px; font-weight: 700; }
+    .prog-hero-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
   </style>
-  </head>
+</head>
 <body>
   <div id="loading-overlay"><div class="spinner"></div></div>
 
-  <nav class="navbar">
+  <div class="prog-page">
+    <nav class="navbar">
       <a href="programming.html" class="navbar-brand">WQTech <span>Programming</span></a>
       <div class="navbar-actions">
         <span class="prog-role-tag" id="roleTag" style="display:none;">Teacher</span>
@@ -31,47 +62,77 @@
       </div>
     </nav>
 
-  <main class="prog-page">
-    <header class="prog-hero">
-      <div>
-        <h1>Programming Hub</h1>
-        <p>Solve coding problems, one test case at a time.</p>
-      </div>
-      <div id="heroActions"></div>
-    </header>
-
-    <section>
-      <div class="prog-section-head">
-        <h2>Activities</h2>
-        <span class="prog-chip" id="activityCount">Loading&hellip;</span>
-      </div>
-
-      <div id="activitiesGrid" class="prog-grid"></div>
-
-      <div id="emptyState" style="display:none;">
-        <div class="prog-empty">
-          <div class="prog-empty-icon">&lt;/&gt;</div>
-          <p id="emptyMsg">No programming activities yet.</p>
-          <div class="prog-cta" id="emptyCta"></div>
+    <div class="prog-content">
+      <!-- Profile Card -->
+      <div class="prog-profile-card">
+        <div class="prog-profile-avatar" id="userAvatar">?</div>
+        <div class="prog-profile-info">
+          <h2 id="userName2"></h2>
+          <p id="userRole">Student</p>
+        </div>
+        <div style="margin-left:auto;">
+          <button class="theme-toggle" onclick="Theme.toggle()" aria-label="Toggle theme" style="display:none;" id="themeBtn"></button>
         </div>
       </div>
-    </section>
-  </main>
 
-  <div class="modal-overlay" id="joinModal" role="dialog" aria-modal="true" aria-label="Join live contest">
+      <!-- Join Live Contest Card (students) -->
+      <div class="prog-join-card" id="studentJoin">
+        <h3>Join a Live Contest</h3>
+        <p>Ask your teacher for the 6-digit PIN and join the live programming contest</p>
+        <div class="prog-hero-actions">
+          <button class="btn btn-primary btn-lg" onclick="openJoinModal()">Join Live Contest</button>
+        </div>
+      </div>
+
+      <!-- Teacher Actions (teachers) -->
+      <div class="prog-join-card" id="teacherActions" style="display:none;">
+        <h3>Host or Create</h3>
+        <p>Start a live contest or create a new programming activity for your class</p>
+        <div class="prog-hero-actions">
+          <a href="live.html" class="btn btn-primary btn-lg" style="background:linear-gradient(135deg,#EF4444,#F97316);color:#fff;box-shadow:0 8px 20px -8px rgba(239,68,68,0.6);">Host Live Contest</a>
+          <a href="create-programming.html" class="btn btn-primary btn-lg">+ Create Programming Activity</a>
+        </div>
+      </div>
+
+      <!-- Activities -->
+      <div class="prog-activities-section">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+          <h3 style="margin:0;">Activities</h3>
+          <span class="prog-chip" id="activityCount">Loading&hellip;</span>
+        </div>
+        <div id="activitiesGrid" class="prog-grid"></div>
+        <div id="emptyState" style="display:none;">
+          <div class="prog-empty">
+            <div class="prog-empty-icon">&lt;/&gt;</div>
+            <p id="emptyMsg">No programming activities yet.</p>
+            <div class="prog-cta" id="emptyCta"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Join Live Contest Modal (same as quiz) -->
+  <div class="modal-overlay" id="joinModal">
     <div class="modal">
       <div class="modal-header">
-        <div class="modal-title">Join Live Contest</div>
-        <button class="modal-close" onclick="closeJoinModal()" aria-label="Close">&times;</button>
+        <h3 class="modal-title">Join a Live Contest</h3>
+        <button class="modal-close" onclick="closeJoinModal()">&times;</button>
       </div>
-      <p class="prog-modal-note">Enter the 6-digit PIN your teacher shared on the live contest screen.</p>
-      <input id="joinPin" class="prog-modal-pin" maxlength="6" inputmode="numeric" autocomplete="one-time-code"
-        placeholder="Enter PIN" aria-label="Contest PIN">
-      <div class="prog-modal-error" id="joinError" style="display:none;"></div>
-      <div class="prog-modal-actions">
-        <button class="btn btn-ghost" onclick="closeJoinModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="submitJoin()">Join Contest</button>
+      <div class="form-group">
+        <label>Enter 6-Digit PIN</label>
+        <div class="game-code-input" id="codeInputs">
+          <input type="text" maxlength="1" inputmode="numeric" pattern="[0-9]" oninput="handleCodeInput(this, 0)">
+          <input type="text" maxlength="1" inputmode="numeric" pattern="[0-9]" oninput="handleCodeInput(this, 1)">
+          <input type="text" maxlength="1" inputmode="numeric" pattern="[0-9]" oninput="handleCodeInput(this, 2)">
+          <input type="text" maxlength="1" inputmode="numeric" pattern="[0-9]" oninput="handleCodeInput(this, 3)">
+          <input type="text" maxlength="1" inputmode="numeric" pattern="[0-9]" oninput="handleCodeInput(this, 4)">
+          <input type="text" maxlength="1" inputmode="numeric" pattern="[0-9]" oninput="handleCodeInput(this, 5)">
+        </div>
       </div>
+      <div id="joinError" style="display:none;color:var(--danger);background:var(--danger-bg);border:1px solid var(--danger);border-radius:10px;padding:10px 12px;font-size:0.88rem;font-weight:600;margin-top:14px;"></div>
+      <button class="btn btn-primary btn-lg" style="width:100%;margin-top:16px;" onclick="submitJoin()">Join</button>
+      <p style="color:var(--text-muted);font-size:0.8rem;margin-top:14px;text-align:center;">You will be locked to fullscreen during the contest. Leaving fullscreen or switching tabs applies penalties.</p>
     </div>
   </div>
 
@@ -98,50 +159,47 @@
       IS_TEACHER = await Programming.isTeacher();
       document.documentElement.classList.remove('auth-gate');
       const name = (Auth.currentUser && Auth.currentUser.user_metadata && Auth.currentUser.user_metadata.name) || 'coder';
-      document.getElementById('userName').textContent = name;
+      const el = document.getElementById('userName2');
+      if (el) el.textContent = name;
       document.getElementById('roleTag').style.display = IS_TEACHER ? 'inline-flex' : 'none';
+      document.getElementById('studentJoin').style.display = IS_TEACHER ? 'none' : 'block';
+      document.getElementById('teacherActions').style.display = IS_TEACHER ? 'block' : 'none';
+      const avatarEl = document.getElementById('userAvatar');
+      if (avatarEl) avatarEl.textContent = name ? name.charAt(0).toUpperCase() : '?';
+      const roleEl = document.getElementById('userRole');
+      if (roleEl) roleEl.textContent = IS_TEACHER ? 'Teacher' : 'Student';
       bindJoinModal();
-      buildHero();
       await renderActivities();
     });
 
-    function buildHero() {
-      const el = document.getElementById('heroActions');
-      if (!IS_TEACHER) {
-        el.innerHTML =
-          '<div class="prog-join">' +
-            '<button class="prog-btn prog-btn-lg prog-btn-primary" onclick="openJoinModal()">Join Live Contest</button>' +
-          '</div>' +
-          '<p class="prog-hero-note">Your teacher will give you the 6-digit PIN. Or pick an activity below and start coding your solution.</p>';
-        return;
-      }
-      el.innerHTML =
-        '<a href="live.html" class="prog-btn prog-btn-lg prog-btn-host">Host Live Contest</a>' +
-        '<a href="create-programming.html" class="prog-btn prog-btn-lg prog-btn-primary">+ Create Programming Activity</a>';
-    }
-
-    // ---------- JOIN LIVE CONTEST POPUP ----------
+    // ---------- JOIN LIVE CONTEST POPUP (quiz-style 6 boxes) ----------
     function openJoinModal() {
       document.getElementById('joinError').style.display = 'none';
       document.getElementById('joinModal').classList.add('active');
-      const i = document.getElementById('joinPin');
-      i.value = '';
-      setTimeout(() => i.focus(), 60);
+      const inputs = document.querySelectorAll('#codeInputs input');
+      inputs.forEach(i => { i.value = ''; });
+      setTimeout(() => { inputs[0].focus(); }, 60);
     }
     function closeJoinModal() {
       document.getElementById('joinModal').classList.remove('active');
     }
+    function handleCodeInput(input, index) {
+      input.value = input.value.replace(/\D/g, '');
+      if (input.value && index < 5) {
+        document.querySelectorAll('#codeInputs input')[index + 1].focus();
+      }
+    }
     function joinError(msg) {
       const e = document.getElementById('joinError');
-      e.textContent = msg;
-      e.style.display = 'block';
-      document.getElementById('joinPin').focus();
+      if (e) { e.textContent = msg; e.style.display = 'block'; }
+      const inputs = document.querySelectorAll('#codeInputs input');
+      if (inputs[0]) inputs[0].focus();
     }
     function submitJoin() {
-      const pin = document.getElementById('joinPin').value.trim();
-      if (!/^\d{6}$/.test(pin)) { joinError('Enter the 6-digit PIN from your teacher.'); return; }
+      const code = Array.from(document.querySelectorAll('#codeInputs input')).map(i => i.value).join('');
+      if (code.length !== 6 || !/^\d{6}$/.test(code)) { joinError('Enter the complete 6-digit PIN from your teacher.'); return; }
       Utils.showLoading();
-      ProgLive.getGameByPin(pin).then((g) => {
+      ProgLive.getGameByPin(code).then((g) => {
         Utils.hideLoading();
         if (!g) { joinError('No live contest found for that PIN.'); return; }
         if (g.status === 'ended') {
@@ -149,19 +207,37 @@
           joinError('This contest has already ended.'); return;
         }
         closeJoinModal();
-        window.location.href = 'activity.html?live=' + encodeURIComponent(pin);
+        window.location.href = 'activity.html?live=' + encodeURIComponent(code);
       }).catch(() => { Utils.hideLoading(); joinError('Could not join the contest right now. Try again.'); });
     }
     function bindJoinModal() {
       const modal = document.getElementById('joinModal');
-      const pin = document.getElementById('joinPin');
-      pin.addEventListener('input', () => { pin.value = pin.value.replace(/\D/g, ''); });
-      pin.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); submitJoin(); } });
-      pin.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeJoinModal(); });
+      const inputs = document.querySelectorAll('#codeInputs input');
+      inputs.forEach((inp, i) => {
+        inp.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') { e.preventDefault(); submitJoin(); }
+          if (e.key === 'Escape') closeJoinModal();
+          if (e.key === 'Backspace' && !inp.value && i > 0) {
+            inputs[i - 1].focus();
+            inputs[i - 1].value = '';
+          }
+        });
+        inp.addEventListener('paste', (e) => {
+          e.preventDefault();
+          const paste = (e.clipboardData || window.clipboardData).getData('text').replace(/\D/g, '').slice(0, 6);
+          for (let j = 0; j < 6 && j < paste.length; j++) {
+            inputs[j].value = paste[j];
+          }
+          if (paste.length > 0) inputs[Math.min(paste.length, 5)].focus();
+        });
+      });
       modal.addEventListener('click', (e) => { if (e.target === modal) closeJoinModal(); });
-      document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeJoinModal(); });
+      document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape' && document.getElementById('joinModal').classList.contains('active')) closeJoinModal();
+      });
     }
 
+    // ---------- ACTIVITIES ----------
     async function renderActivities() {
       const grid = document.getElementById('activitiesGrid');
       const count = document.getElementById('activityCount');
@@ -198,7 +274,7 @@
       const cta = document.getElementById('emptyCta');
       if (IS_TEACHER) {
         msg.textContent = 'No programming activities yet. Create the first one for your class.';
-        cta.innerHTML = '<a href="create-programming.html" class="prog-btn prog-btn-primary">+ Create Programming Activity</a>';
+        cta.innerHTML = '<a href="create-programming.html" class="btn btn-primary">+ Create Programming Activity</a>';
       } else {
         msg.textContent = 'No published activities yet. Check back soon!';
         cta.innerHTML = '';
@@ -210,14 +286,14 @@
       const statusPill = '<span class="prog-status-badge ' + a.status + '">' + (a.status === 'published' ? 'Published' : 'Draft') + '</span>';
       let actions = '';
       if (IS_TEACHER) {
-        actions += '<a class="prog-btn prog-btn-outline prog-btn-sm" href="activity.html?id=' + a.id + '">Open</a>';
-        actions += '<a class="prog-btn prog-btn-ghost prog-btn-sm" href="results.html?activity=' + a.id + '">Results</a>';
+        actions += '<a class="btn btn-primary btn-sm" href="activity.html?id=' + a.id + '">Open</a>';
+        actions += '<a class="btn btn-ghost btn-sm" href="results.html?activity=' + a.id + '">Results</a>';
         if (mine) {
-          actions += '<a class="prog-btn prog-btn-ghost prog-btn-sm" href="create-programming.html?id=' + a.id + '">Edit</a>';
-          actions += '<button class="prog-btn prog-btn-danger prog-btn-sm" onclick="delActivity(\'' + a.id + '\')">Delete</button>';
+          actions += '<a class="btn btn-ghost btn-sm" href="create-programming.html?id=' + a.id + '">Edit</a>';
+          actions += '<button class="btn btn-ghost btn-sm" style="color:var(--danger);" onclick="delActivity(\'' + a.id + '\')">Delete</button>';
         }
       } else {
-        actions = '<a class="prog-btn prog-btn-success prog-btn-sm" href="activity.html?id=' + a.id + '">Start Activity</a>';
+        actions = '<a class="btn btn-success btn-sm" href="activity.html?id=' + a.id + '">Start Activity</a>';
       }
       const lang = langLabel(a.language);
       return '<div class="prog-card">' +

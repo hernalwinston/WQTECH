@@ -405,8 +405,18 @@
     let VIOLATIONS = 0, LAST_VIOL = 0, LOCKED_OUT = false, LOCKOUT_DONE = false;
 
     // ---------- HELPERS ----------
-    const $ = (id) => document.getElementById(id);
-    const getEditorValue = () => $('editor').value;
+    const $ = (id) => {
+      const el = document.getElementById(id);
+      if (el) return el;
+      return { textContent:'', innerHTML:'', className:'',
+        style:{display:'',setProperty(){},getPropertyValue(){return''}},
+        classList:{add(){},remove(){},toggle(){},contains(){return false}},
+        focus(){},click(){},scrollHeight:0,scrollTop:0,value:'',
+        setAttribute(){},getAttribute(){return''},querySelector(){return null},querySelectorAll(){return[]},
+        insertAdjacentHTML(){},appendChild(){},removeChild(){},replaceChildren(){}
+      };
+    };
+    const getEditorValue = () => { const e = $('editor'); return e && e.value ? e.value : ''; };
     const penaltyPerViolation = () => (LIVE_GAME && LIVE_GAME.penalty_points) || 5;
     const maxViolations = () => (LIVE_GAME && LIVE_GAME.max_violations) || 3;
 
