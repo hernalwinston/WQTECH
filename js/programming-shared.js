@@ -145,9 +145,76 @@ window.Programming = (function () {
     ? SUPABASE_URL.replace(/\/$/, '') + '/functions/v1/programming-run'
     : '';
 
-  // Public Judge0 CE sandbox. Used as an automatic fallback so Run/Check
-  // works even before (or without) the Supabase Edge Function being deployed.
+// Public Judge0 CE sandbox. Used as an automatic fallback so Run/Check
+  // works even before (without) the Supabase Edge Function being deployed.
   const JUDGE0_PUBLIC = 'https://ce.judge0.com/submissions';
+
+  // Judge0 CE quota-safe execution limits. The public runner (and most
+  // self-hosted instances) reject out-of-range cpu/memory limits with an
+  // HTTP 400, so we clamp to values every CE instance accepts. The Edge
+  // Function applies the same clamps; override them server-side with the
+  // RUNNER_MAX_CPU_SECONDS / RUNNER_MEMORY_LIMIT_KB env vars.
+  const RUNNER_MAX_CPU_SECONDS = 3;
+  const RUNNER_MEMORY_LIMIT_KB = 128000;
+
+// Piston API (https://github.com/engineer-man/piston) — PRIMARY runner when
+// a Piston instance is configured. Point window.PISTON_BASE at your OWN
+// instance (e.g. "http://your-host:2000/api/v2/piston") once self-hosted
+// via Docker; the public emkc.org API is whitelist-only since 2/15/2026, so
+// it is never called by default. Piston posts source + stdin and runs to
+// completion using compile_timeout/run_timeout. It takes NO cpu/memory
+// limit params, so the out-of-range HTTP 400 simply cannot happen.
+// Runtime versions are fetched once per hour and cached, with local
+// defaults as a network-free fallback.
+  const PISTON_BASE = (typeof window !== 'undefined' && window.PISTON_BASE && String(window.PISTON_BASE).trim())
+    ? String(window.PISTON_BASE).trim().replace(/\/+$/, '')
+    : '';
+  const PISTON_RUNTIME_DEFAULTS = { c: '10.2.0', 'c++': '10.2.0', csharp: '6.12.0', java: '17.0.9', python: '3.10.0' };
+  let pistonRuntimes = null, pistonRuntimesAt = 0;
+
+  async function pistonVersion(pistonLang) {
+    if (!pistonRuntimes || Date.now() - pistonRuntimesAt > 3600000) {
+      try {
+        const r = await fetch(PISTON_BASE + '/runtimes');
+        if (r.ok) pistonRuntimes = await r.json();
+      } catch (e) { /* keep the previous cache (if any) */ }
+      pistonRuntimesAt = Date.now();
+    }
+    const versions = (pistonRuntimes || [])
+      .filter(x => x && x.language === pistonLang)
+      .map(x => x.version);
+    if (versions.length) {
+      return versions.slice().sort((a, b) => {
+        const pa = String(a).split(/[.\-]/).map(x => parseInt(x, 10) || 0);
+        const pb = String(b).split(/[.\-]/).map(x => parseInt(x, 10) || 0);
+        for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+          const va = pa[i] || 0, vb = pb[i] || 0;
+          if (va !== vb) return vb - va;
+        }
+        return 0;
+      })[0];
+    }
+    return PISTON_RUNTIME_DEFAULTS[pistonLang] || '';
+  }
+
+  function pistonFileName(pistonLang) {
+    if (pistonLang === 'java') return 'Main.java';
+    if (pistonLang === 'c++') return 'main.cpp';
+    if (pistonLang === 'csharp') return 'main.cs';
+    if (pistonLang === 'python') return 'main.py';
+    if (pistonLang === 'c') return 'main.c';
+    return 'main.txt';
+  }
+
+  // Accepts Piston language names (what RUN_LANG is set to) or the id forms.
+  function pistonLang(language) {
+    const l = String(language || '').toLowerCase();
+    if (l === 'c' || l === 'c++' || l === 'csharp' || l === 'java' || l === 'python') return l;
+    if (l === 'cpp' || l === 'cplusplus') return 'c++';
+    if (l === 'cs' || l === 'c#') return 'csharp';
+    if (l === 'python3' || l === 'py') return 'python';
+    return 'c++';
+  }
 
   // App language -> Judge0 CE language_id (stable for the CE language set).
   function judge0LangId(language) {
@@ -187,19 +254,21 @@ window.Programming = (function () {
       };
     }
 
-    // ---- Piston shape (self-hosted runner / legacy) ----
+    // ---- Piston shape (public API / primary runner) ----
     const run = raw.run || {};
     const compile = raw.compile || {};
     const stdout = String(raw.stdout != null ? raw.stdout : (run.stdout || '')).replace(/\s+$/g, '');
     const stderr = String(raw.stderr != null ? raw.stderr : (run.stderr || '')).replace(/\s+$/g, '');
-    const compileErr = (raw.compile_error != null) ? raw.compile_error
-                     : (compile && compile.stderr) ? compile.stderr : '';
+    const compileFailed = (compile && typeof compile.code === 'number' && compile.code !== 0);
+    let compileErr = (raw.compile_error != null) ? raw.compile_error
+                   : (compile && (compile.stderr || compile.output)) ? (compile.stderr || compile.output) : '';
+    if (compileFailed && !compileErr) compileErr = 'Compilation Error';
     const compileOut = (raw.compile_output != null) ? raw.compile_output
                      : (compile && compile.stdout) ? compile.stdout : '';
     const runSig = raw.signals || (run && run.signal) || null;
     const runCode = (typeof raw.exit_code === 'number') ? raw.exit_code : (run && run.code);
     const timedOut = runSig === 'SIGKILL' || runCode === 124 || runCode === 137;
-    const hasCompileErr = !!(compileErr);
+    const hasCompileErr = !!(compileErr) || compileFailed;
     let runtimeError = '';
     if (raw.runtime_error != null) runtimeError = raw.runtime_error;
     else if (!hasCompileErr && runCode != null && runCode !== 0) {
@@ -223,11 +292,56 @@ window.Programming = (function () {
     } catch (e) { return ''; }
   }
 
+  function executionError(status, detail) {
+    const err = new Error('Execution service error (HTTP ' + status + ')');
+    err.kind = 'execution';
+    err.status = status;
+    err.detail = detail || '';
+    return err;
+  }
+
+  async function runInPiston({ language, source, stdin, timeoutMs }) {
+    const t = Math.min(Math.max(parseInt(timeoutMs, 10) || 4000, 200), 20000);
+    const plang = pistonLang(language);
+    const res = await fetch(PISTON_BASE + '/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        language: plang,
+        version: await pistonVersion(plang),
+        files: [{ name: pistonFileName(plang), content: source }],
+        stdin: stdin || '',
+        args: [],
+        compile_timeout: 10000,
+        run_timeout: t
+      })
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const detail = (body && body.message) || (body && body.error) || (body && body.detail) || '';
+      throw executionError(res.status, detail);
+    }
+    return normalizeRun(await res.json());
+  }
+
   async function runInSandbox({ language, source, stdin, timeoutMs }) {
     const t = parseInt(timeoutMs, 10) || 4000;
     if (!source) throw new Error('No code to run.');
 
-    // 1) Preferred: your own Supabase Edge Function (server -> judge).
+    // 1) PRIMARY (when configured): a self-hosted Piston instance.
+    //    No cpu/memory limit params, so the out-of-range HTTP 400 cannot
+    //    happen. If it is unreachable or rejects us, log it and fall
+    //    through to the Edge Function / Judge0 path so a hiccup never
+    //    blocks anyone.
+    if (PISTON_BASE) {
+      try {
+        return await runInPiston({ language, source, stdin, timeoutMs: t });
+      } catch (e) {
+        if (e && e.kind === 'execution') console.error('piston runner -> HTTP ' + e.status + ': ' + (e.detail || e.message));
+      }
+    }
+
+    // 2) Fallback: your own Supabase Edge Function (server -> judge).
     if (FUNCTIONS_BASE) {
       try {
         const controller = new AbortController();
@@ -241,10 +355,15 @@ window.Programming = (function () {
         });
         clearTimeout(to);
         if (res.ok) return normalizeRun(await res.json());
+        // Edge Function is reachable but failed. Log it (Supabase function
+        // logs / browser console) then still fall back to the public sandbox
+        // so a temporary upstream hiccup never blocks participants.
+        const tErr = await res.text().catch(() => '');
+        console.error('programming-run edge function -> HTTP ' + res.status + ': ' + tErr.slice(0, 300));
       } catch (e) { /* unreachable / not deployed / CORS -> fall through to Judge0 */ }
     }
 
-    // 2) Fallback: Judge0 CE directly from the browser.
+    // 3) Fallback: Judge0 CE directly from the browser.
     const res = await fetch(JUDGE0_PUBLIC + '?base64_encoded=false&wait=true', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -252,13 +371,14 @@ window.Programming = (function () {
         source_code: source,
         language_id: judge0LangId(language),
         stdin: stdin || '',
-        cpu_time_limit: Math.min(Math.max(Math.ceil(t / 1000), 1), 10),
-        memory_limit: 131072
+        cpu_time_limit: Math.min(Math.max(Math.ceil(t / 1000), 1), RUNNER_MAX_CPU_SECONDS),
+        memory_limit: RUNNER_MEMORY_LIMIT_KB
       })
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
-      throw new Error((body && body.message) || ('Runner error ' + res.status));
+      const detail = (body && body.message) || (body && body.error) || (body && body.detail) || '';
+      throw executionError(res.status, detail);
     }
     return normalizeRun(await res.json());
   }

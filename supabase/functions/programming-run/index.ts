@@ -21,6 +21,15 @@ import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 const RUNNER = Deno.env.get("RUNNER_URL") ||
   "https://ce.judge0.com/submissions";
 
+// Judge0 CE quota-safe execution limits. The public runner (and most
+// self-hosted instances) reject out-of-range cpu/memory limits with an
+// HTTP 400, so clamp to values every CE instance accepts. Override these
+// with RUNNER_MAX_CPU_SECONDS / RUNNER_MEMORY_LIMIT_KB once you self-host.
+const RUNNER_MAX_CPU_SECONDS = Math.min(Math.max(
+  parseInt(Deno.env.get("RUNNER_MAX_CPU_SECONDS") || "3", 10) || 3, 1), 10);
+const RUNNER_MEMORY_LIMIT_KB = parseInt(
+  Deno.env.get("RUNNER_MEMORY_LIMIT_KB") || "128000", 10) || 128000;
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -35,6 +44,7 @@ function json(body, status) {
 }
 
 // App language label -> Judge0 CE language_id (stable CE language set).
+// Returns null for languages this runner does not support.
 function judge0LangId(language) {
   const l = String(language || "").toLowerCase();
   if (l === "c") return 50;
@@ -42,7 +52,7 @@ function judge0LangId(language) {
   if (l === "c#" || l === "csharp" || l === "cs") return 51;
   if (l === "java") return 62;
   if (l === "python" || l === "python3") return 71;
-  return 54;
+  return null;
 }
 
 serve(async (req) => {
@@ -55,8 +65,12 @@ serve(async (req) => {
   if (!language || typeof source !== "string" || !source.trim()) {
     return json({ message: "language and source are required" }, 400);
   }
+  const langId = judge0LangId(language);
+  if (!langId) {
+    return json({ message: "Unsupported language: " + String(language) }, 400);
+  }
 
-  const t = Math.max(1, Math.min(Math.round((parseInt(timeout_ms, 10) || 4000) / 1000), 10));
+  const t = Math.max(1, Math.min(Math.round((parseInt(timeout_ms, 10) || 4000) / 1000), RUNNER_MAX_CPU_SECONDS));
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), t * 1000 + 5000);
   try {
@@ -65,17 +79,22 @@ serve(async (req) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         source_code: source,
-        language_id: judge0LangId(language),
+        language_id: langId,
         stdin: stdin || "",
         cpu_time_limit: t,
-        memory_limit: 131072,
+        memory_limit: RUNNER_MEMORY_LIMIT_KB,
       }),
       signal: controller.signal,
     });
     clearTimeout(timer);
     if (!res.ok) {
       const txt = await res.text().catch(() => "");
-      return json({ message: "Runner upstream error " + res.status + (txt ? ": " + txt.slice(0, 200) : "") }, 502);
+      console.error("programming-run upstream HTTP " + res.status + ": " + txt.slice(0, 500));
+      return json({
+        message: "Execution service error (HTTP " + res.status + ")",
+        status: res.status,
+        detail: txt.slice(0, 500)
+      }, 502);
     }
     const run = await res.json();
     return json(run, 200);

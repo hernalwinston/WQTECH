@@ -393,6 +393,7 @@
   <script src="../../js/theme.js"></script>
   <script src="../../js/utils.js"></script>
   <script src="../../js/auth.js"></script>
+  <script src="../../js/piston-config.js"></script>
   <script src="../../js/programming-shared.js"></script>
   <script src="../../js/programming-live.js"></script>
 
@@ -762,6 +763,15 @@
       if (typeof res.time_ms === 'number') appendConsole('Execution time: ' + res.time_ms + ' ms', 'time pa-con-time');
       return failed;
     }
+    function showRunError(prefix, e) {
+      if (e && e.kind === 'execution') {
+        appendConsole(prefix + 'Unable to start the code runner. Please check the execution service configuration.', 'err');
+        if (e.status) appendConsole('Execution service returned HTTP ' + e.status + '.', 'muted');
+        console.error('Execution service detail:', e.detail || e.message || '');
+      } else {
+        appendConsole(prefix + ((e && e.message) || 'unknown error'), 'err');
+      }
+    }
     const RUN_HTML = '<svg class="pa-run-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
     let ioActive = false, ioPlan = null, ioStep = 0, ioUserInputs = [], ioLineEl = null, ioLineOpen = false, ioP = null, ioSrc = '';
 
@@ -918,8 +928,26 @@
     }
     document.addEventListener('keydown', ioHandleKey, true);
 
+    function trimOut(s) {
+      return String(s == null ? '' : s).replace(/^\s+|\s+$/g, '');
+    }
+    function normOut(s) {
+      return String(s == null ? '' : s).replace(/\s+$/g, '');
+    }
+    function finishConsole(state) {
+      setBusy(false);
+      $('btnRun').innerHTML = RUN_HTML + ' Run Code';
+      $('consoleHint').textContent = state || 'Program finished — press Run Code again or use Check Code to grade';
+    }
+
+    // Called whenever the plan's collected inputs end. Re-runs the program
+    // with those inputs, then probes with ONE extra line ("9") to learn
+    // whether the program is still blocked on input (loops never auto-fill
+    // or truncate): if the probe changes stdout, the student must type the
+    // next value instead of us pretending the run finished.
     async function finishInteractive() {
       const p = ioP, src = ioSrc;
+      if (!p) { await deactivateInteractive(); return; }
       setBusy(true);
       $('btnRun').innerHTML = RUN_HTML + ' Running…';
       removeLiveInput();
@@ -928,23 +956,45 @@
         lastSavedAt = Date.now(); updateSaveStatus();
       } catch (e) { try { scheduleSave(); } catch (e2) { updateSaveStatus('error'); } }
       const stdin = ioUserInputs.join('\n') + '\n';
+      let res;
       try {
-        const res = await Programming.runInSandbox({ language: RUN_LANG, source: src, stdin, timeoutMs: 4000 });
-        if (res.compile_error) { appendConsole('Compilation Error', 'err'); appendConsole(res.compile_error || '', 'err'); }
-        else if (res.runtime_error) { appendConsole('Runtime Error — ' + (res.runtime_error || 'the program crashed'), 'err'); }
-        else if (res.status === 'tle') { appendConsole('Time Limit Exceeded (code ran too long)', 'err'); }
-        else {
-          const tail = interactiveTail(res.stdout || '', ioPlan ? ioPlan.steps : []);
-          const trimmed = String(tail == null ? '' : tail).replace(/^\s+|\s+$/g, '');
-          if (trimmed) { if (ioLineOpen && ioLineEl) addTextToLine(ioLineEl, ' ' + trimmed); else appendConsole(trimmed, 'ok'); }
-          appendConsole('Program finished successfully.', 'ok');
-        }
+        res = await Programming.runInSandbox({ language: RUN_LANG, source: src, stdin, timeoutMs: 4000 });
       } catch (e) {
-        appendConsole('Could not run: ' + (e.message || 'unknown error'), 'err');
+        showRunError('Could not run: ', e);
+        finishConsole();
+        await deactivateInteractive();
+        return;
       }
-      $('consoleHint').textContent = 'Program finished — press Run Code again or use Check Code to grade';
-      setBusy(false);
-      $('btnRun').innerHTML = RUN_HTML + ' Run Code';
+      const probe = await Programming.runInSandbox({ language: RUN_LANG, source: src, stdin: stdin + '9\n', timeoutMs: 4000 })
+        .catch((e) => { console.error(e); return null; });
+      const probeErr = probe && (probe.compile_error || probe.runtime_error || probe.status === 'tle');
+      if (probe && !probeErr && normOut(probe.stdout) !== normOut(res.stdout) && !res.compile_error) {
+        // The program is still waiting for input — keep the console open.
+        const tail = interactiveTail(res.stdout || '', ioPlan ? ioPlan.steps : []);
+        const shown = trimOut(tail == null ? (res.stdout || '') : tail);
+        if (shown) appendConsole(shown, 'ok');
+        ioLineEl = newLine(); ioLineOpen = false;
+        showLiveInput(ioLineEl);
+        finishConsole('The program still needs input — type the next value and press Enter');
+        return;
+      }
+      if (res.compile_error) { appendConsole('Compilation Error', 'err'); appendConsole(res.compile_error || '', 'err'); finishConsole(); await deactivateInteractive(); return; }
+      if (res.runtime_error) { appendConsole('Runtime Error — ' + (res.runtime_error || 'the program crashed'), 'err'); if (res.stderr) appendConsole(res.stderr, 'err'); finishConsole(); await deactivateInteractive(); return; }
+      if (probe && (probe.runtime_error || probe.compile_error) && !res.runtime_error && !res.compile_error && !res.stderr && (!res.stdout || !res.stdout.trim())) {
+        appendConsole('Runtime Error — ' + (probe.runtime_error || 'the program crashed'), 'err');
+        if (probe.stderr) appendConsole(probe.stderr, 'err');
+        finishConsole(); await deactivateInteractive(); return;
+      }
+      if (res.status === 'tle' || (probe && probe.status === 'tle')) { appendConsole('Time Limit Exceeded (code ran too long)', 'err'); finishConsole(); await deactivateInteractive(); return; }
+      const srcOut = String((probe || res).stdout || '');
+      const tail = interactiveTail(srcOut, ioPlan ? ioPlan.steps : []);
+      const trimmed = trimOut(tail == null ? (res.stdout || '') : tail);
+      if (trimmed) appendConsole(trimmed, 'ok');
+      appendConsole('Program finished successfully.', 'ok');
+      finishConsole();
+      await deactivateInteractive();
+    }
+    async function deactivateInteractive() {
       ioActive = false; ioPlan = null; ioStep = 0; ioUserInputs = []; ioP = null; ioSrc = '';
     }
 
@@ -963,7 +1013,7 @@
         const failed = renderRunResult(res);
         if (!failed) appendConsole('Program finished successfully.', 'ok');
       } catch (e) {
-        appendConsole('Could not run: ' + (e.message || 'unknown error'), 'err');
+        showRunError('Could not run: ', e);
       }
       $('consoleHint').textContent = 'Program finished — press Run Code again or use Check Code to grade';
       $('btnRun').innerHTML = RUN_HTML + ' Run Code';
@@ -1001,7 +1051,7 @@
         if (LIVE) await pushLiveScore();
         openGradeOverlay(p, report);
       } catch (e) {
-        appendConsole('Could not check: ' + (e.message || 'unknown error'), 'err');
+        showRunError('Could not check: ', e);
       }
       setBusy(false);
     }
