@@ -131,31 +131,25 @@
     .tok-pre { color: #E06C75; font-style: italic; } /* preprocessor */
     .hl-sel  { background: rgba(97,175,239,0.28); } /* current text selection */
 
-    .pa-console { background: var(--card); border: 1px solid var(--card-border); border-radius: var(--radius-lg); overflow: hidden; display: flex; flex-direction: column; }
-    .pa-console-head { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid var(--card-border); background: var(--bg-secondary); }
-    .pa-console-head span { font-size: 0.72rem; font-weight: 800; letter-spacing: 0.9px; text-transform: uppercase; color: var(--text-secondary); }
-    .pa-console-head .pa-con-hint { margin-left: auto; font-size: 0.7rem; color: var(--text-muted); text-transform: none; letter-spacing: 0; font-weight: 600; }
-    .pa-console-out { margin: 0; padding: 12px 14px; min-height: 88px; max-height: 210px; overflow: auto;
-      font-family: 'SFMono-Regular', Consolas, 'Cascadia Mono', monospace; font-size: 0.82rem; line-height: 1.6; white-space: pre-wrap; color: var(--text); }
+    .pa-console { background: #0D0E12; border: 1px solid #26283A; border-radius: var(--radius-lg); overflow: hidden; display: flex; flex-direction: column; }
+    .pa-console-head { display: flex; align-items: center; gap: 10px; padding: 8px 14px; border-bottom: 1px solid #26283A; background: #16171F; }
+    .pa-console-head span { font-size: 0.72rem; font-weight: 800; letter-spacing: 0.9px; text-transform: uppercase; color: #8B90A6; }
+    .pa-console-head .pa-con-hint { margin-left: auto; font-size: 0.7rem; color: #5A5F76; text-transform: none; letter-spacing: 0; font-weight: 600; }
+    .pa-console-out { margin: 0; padding: 12px 16px; min-height: 120px; max-height: 300px; overflow: auto; background: #0D0E12;
+      font-family: 'SFMono-Regular', Consolas, 'Cascadia Mono', monospace; font-size: 0.82rem; line-height: 1.65;
+      white-space: pre-wrap; color: #D9DCE8; }
     .pa-con { white-space: pre-wrap; }
-    .pa-con.ok { color: #16A34A; } [data-theme="dark"] .pa-con.ok { color: #4ADE80; }
-    .pa-con.err { color: #DC2626; } [data-theme="dark"] .pa-con.err { color: #F87171; }
-    .pa-con.warn { color: #B45309; } [data-theme="dark"] .pa-con.warn { color: #FBBF24; }
-    .pa-con.muted { color: var(--text-muted); }
-    .pa-con.in { color: #22D3EE; }
-    .pa-con.time { color: var(--text-muted); font-size: 0.76rem; }
-    .pa-con-term { display: flex; align-items: center; gap: 8px; padding: 8px 14px; border-top: 1px solid var(--card-border); background: var(--bg-secondary); }
-    .pa-con-term .pa-caret { font-weight: 800; color: var(--accent); font-family: 'SFMono-Regular', Consolas, monospace; font-size: 0.85rem; user-select: none; }
-    .pa-con-term .pa-caret::after { content: ''; display: inline-block; width: 7px; height: 15px; margin-left: 1px;
-      background: #818CF8; vertical-align: -2px; animation: pa-blink 1.1s steps(2, start) infinite; }
+    .pa-con.ok { color: #3CCF8F; }
+    .pa-con.err { color: #F87171; }
+    .pa-con.warn { color: #FBBF24; }
+    .pa-con.muted { color: #6B7280; }
+    .pa-con.in { color: #22D3EE; font-weight: 700; }
+    .pa-con.time { color: #6B7280; font-size: 0.76rem; }
+    .pa-con .pa-blk { width: 9px; height: 1.05em; background: #818CF8; display: inline-block; margin-left: 3px; vertical-align: -3px; animation: pa-blink 1.1s steps(2, start) infinite; }
+    .pa-li { background: transparent; border: none; outline: none; padding: 0 2px; margin: 0; min-width: 2ch;
+      color: #22D3EE; font-weight: 700; caret-color: transparent;
+      font-family: 'SFMono-Regular', Consolas, 'Cascadia Mono', monospace; font-size: 0.82rem; line-height: 1.65; }
     @keyframes pa-blink { to { visibility: hidden; } }
-    .pa-term-in { flex: 1; background: transparent; border: none; outline: none; resize: none; overflow: hidden;
-      color: var(--text); font-family: 'SFMono-Regular', Consolas, 'Cascadia Mono', monospace; font-size: 0.85rem; line-height: 1.5;
-      caret-color: #818CF8; }
-    .pa-term-in::placeholder { color: #5A5F76; font-style: italic; }
-    .pa-term-send { flex: 0 0 30px; width: 30px; height: 30px; background: var(--accent); color: #fff;
-      border: none; border-radius: 8px; font-size: 1rem; line-height: 1; cursor: pointer; font-family: inherit; }
-    .pa-term-send:hover { background: #7C86F5; }
     .pa-run-ico { width: 15px; height: 15px; display: inline-block; vertical-align: -2px; margin-right: 6px; }
     #btnRun { display: inline-flex; align-items: center; }
 
@@ -300,10 +294,12 @@
             <span class="pa-editor-lang" id="editorLangChip">CODE</span>
             <span class="pa-editor-spacer"></span>
             <span class="pa-save" id="saveStatus">Not started</span>
-            <button class="btn btn-ghost pa-head-btn" onclick="submitAll()" id="btnSubmitBottom">Finish &amp; Submit</button>
             <button class="btn btn-primary pa-head-btn" id="btnRun" onclick="runCode()">
-              <svg class="pa-run-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg> Run
+              <svg class="pa-run-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg> Run Code
             </button>
+            <button class="btn btn-ghost pa-head-btn" id="btnSave" onclick="manualSave()">Save Code</button>
+            <button class="btn btn-ghost pa-head-btn" id="btnCheck" onclick="checkCode()">Check Code</button>
+            <button class="btn btn-ghost pa-head-btn" onclick="submitAll()" id="btnSubmitBottom">Finish &amp; Submit</button>
           </div>
           <div class="pa-editor-body">
             <div class="pa-gutter" id="gutterWrap"><div class="pa-gutter-lines" id="gutterLines"></div></div>
@@ -314,13 +310,8 @@
         </div>
 
         <div class="pa-console">
-          <div class="pa-console-head"><span>Console</span><span class="pa-con-hint" id="consoleHint"></span></div>
-          <pre class="pa-console-out" id="consoleOut"></pre>
-          <div class="pa-con-term">
-            <span class="pa-caret">&gt;</span>
-            <textarea class="pa-term-in" id="termInput" rows="1" spellcheck="false" placeholder="Type program input, then press Enter to run (Shift+Enter for a new line)…"></textarea>
-            <button class="pa-term-send" id="btnSend" title="Run with input (Enter)" onclick="runCode()">&#9166;</button>
-          </div>
+          <div class="pa-console-head"><span>Program Output</span><span class="pa-con-hint" id="consoleHint">When the program asks for input, type it right here in the console and press Enter</span></div>
+          <div class="pa-console-out" id="consoleOut"></div>
         </div>
       </section>
 
@@ -447,7 +438,7 @@
       if (!lastBest[p.id] || (report.score || 0) > (lastBest[p.id].score || 0)) lastBest[p.id] = report;
     }
     function setBusy(b) {
-      ['btnRun', 'btnSubmit', 'btnSubmitBottom', 'termInput', 'btnSend'].forEach(id => { const el = $(id); if (el) el.disabled = b; });
+      ['btnRun', 'btnSave', 'btnCheck', 'btnSubmit', 'btnSubmitBottom'].forEach(id => { const el = $(id); if (el) el.disabled = b; });
     }
     function setProgress(text) { $('consoleOut').innerHTML = '<div class="pa-con muted">' + Utils.sanitize(text) + '</div>'; }
     function appendConsole(text, cls) {
@@ -579,12 +570,6 @@
       try {
         const vis = await Programming.getVisibleTestCases(p.id);
         sampleInputs[p.id] = (vis.sample && vis.sample.length) ? (vis.sample[0].input || '') : '';
-        const st = $('termInput');
-        if (st) {
-          st.value = sampleInputs[p.id] || '';
-          autoGrowTermInput();
-        }
-        $('consoleHint').textContent = vis.sample && vis.sample.length ? 'Sample 1 input loaded — edit it, press Enter' : 'Type input, press Enter';
         if (!vis.sample || !vis.sample.length) { list.innerHTML = '<p class="pa-empty">No sample cases provided for this problem.</p>'; return; }
         list.innerHTML = vis.sample.map((t, i) =>
           '<div class="pa-sample"><div class="pa-sample-h">Sample ' + (i + 1) + '</div><div class="pa-sample-b">' +
@@ -733,19 +718,6 @@
         }
         if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) { e.preventDefault(); manualSave(); }
       });
-      const ti = $('termInput');
-      ti.addEventListener('input', autoGrowTermInput);
-      ti.addEventListener('keydown', (e) => {
-        if (!checkingAll && ((e.key === 'Enter' && !e.shiftKey) || ((e.ctrlKey || e.metaKey) && e.key === 'Enter'))) {
-          e.preventDefault(); runCode();
-        }
-      });
-    }
-    function autoGrowTermInput() {
-      const t = $('termInput');
-      if (!t || !t.style) return;
-      t.style.height = 'auto';
-      t.style.height = Math.min(t.scrollHeight, 120) + 'px';
     }
     async function loadRemote(p) {
       try {
@@ -788,22 +760,198 @@
       if (res.stdout) { appendConsole('-- program output --', 'muted'); appendConsole(res.stdout, 'ok'); }
       if (!failed && !res.stdout && !res.stderr && !res.compile_error) appendConsole('Run finished with no output.', 'muted');
       if (typeof res.time_ms === 'number') appendConsole('Execution time: ' + res.time_ms + ' ms', 'time pa-con-time');
+      return failed;
     }
     const RUN_HTML = '<svg class="pa-run-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';
-    async function runCode() {
-      const p = PROBLEMS[CURRENT];
-      if (!p || checkingAll || LOCKED_OUT || finalized || $('btnRun').disabled) return;
-      const src = getEditorValue();
-      if (!src || !src.trim()) { Utils.showToast('Write some code first', 'error'); return; }
-      currentCodeByProblem[p.id] = src;
-      setBusy(true);
-      $('btnRun').innerHTML = RUN_HTML + 'Running…';
-      resetConsole();
-      const stdin = $('termInput').value || '';
-      if (stdin) {
-        stdin.split(/\r?\n/).forEach(l => { if (l.trim() !== '' || l !== '') appendConsole('> ' + l, 'in'); });
+    let ioActive = false, ioPlan = null, ioStep = 0, ioUserInputs = [], ioLineEl = null, ioLineOpen = false, ioP = null, ioSrc = '';
+
+    // Detect ordered cout/printf/Console.Write|ReadLine/System.out.print|Scanner.nextXxx/
+    // Python print|input pairs so the console becomes a TRUE interactive terminal
+    // (program prompt -> you type -> Enter -> next prompt), for C, C++, C#, Java AND Python.
+    function literalText(s) {
+      return String(s || '').slice(1, -1).replace(/\\n/g, '\n').replace(/\\t/g, '\t');
+    }
+    function ioOutStep(key, statement, literals) {
+      const texts = literals.map(literalText);
+      const text = texts.join('');
+      const lastRaw = (literals[literals.length - 1] || '').slice(1, -1);
+      let nl = !!texts.some(t => t.indexOf('\n') !== -1);
+      if (key === 'csharp') nl = nl || /\bWriteLine\s*\(/.test(statement);
+      else if (key === 'java') nl = nl || /println\s*\(/.test(statement) || (/\bprintf\s*\(/.test(statement) && /\\n/.test(statement));
+      else if (key === 'c++') nl = nl || /\bendl\b/.test(statement);
+      const dynamic = texts.some(t => /%[-+0 #\.\d]*[diufegscxXop]/.test(t)) || /\$\{/.test(statement) || /\{[^{}]*\}/.test(texts.join(' '));
+      return dynamic ? { t: 'dyn' } : { t: 'out', text, nl };
+    }
+    function extractIOPlan(source, langKey) {
+      const key = String(langKey || 'c++').toLowerCase();
+      const isPy = key === 'python';
+      if (!isPy && ['c', 'c++', 'csharp', 'java'].indexOf(key) === -1) return null;
+      let code = String(source || '')
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/\/\/[^\n]*/g, '')
+        .replace(/^\s*#[^\n]*$/gm, '');
+      const steps = [];
+      if (isPy) {
+        for (const raw of code.split('\n')) {
+          const s = raw.trim();
+          if (!s) continue;
+          const im = s.match(/input\s*\(([^)]*)\)/);
+          if (im) {
+            const prm = (im[1] || '').trim().match(/^('(?:\\'|[^'\\])*'|"(?:\\"|[^"\\])*")/);
+            if (prm) steps.push({ t: 'out', text: literalText(prm[1]), nl: false });
+            steps.push({ t: 'in' });
+            continue;
+          }
+          if (/print\s*\(/.test(s)) {
+            const strs = s.match(/"(?:\\"|[^"\\])*"|'(?:\\'|[^'\\])*'/g) || [];
+            steps.push(ioOutStep(key, s, strs));
+          }
+        }
+      } else {
+        const outPat = key === 'c' ? /printf\s*\(/ :
+                       key === 'csharp' ? /Console\s*\.\s*(Write|WriteLine)\s*\(/ :
+                       key === 'java' ? /System\s*\.\s*out\s*\.\s*(print|println|printf)\s*\(/ :
+                       /cout\s*<</;
+        const inPat = key === 'c' ? /scanf\s*\(/ :
+                      key === 'csharp' ? /ReadLine\s*\(/ :
+                      key === 'java' ? /\.\s*next(Int|Long|Double|Float|Line|Short|Byte|Boolean|BigInteger|BigDecimal)?\s*\(/ :
+                      /cin\s*>>/;
+        for (const raw of code.split(';')) {
+          const s = raw.trim();
+          if (!s) continue;
+          if (outPat.test(s)) {
+            const strs = s.match(/"(?:\\"|[^"\\])*"|'(?:\\'|[^'\\])*'/g) || [];
+            steps.push(ioOutStep(key, s, strs));
+          } else if (inPat.test(s)) {
+            steps.push({ t: 'in' });
+          }
+        }
       }
-      appendConsole('── OUTPUT ───────────────', 'muted');
+      const inputs = steps.filter(x => x.t === 'in').length;
+      if (inputs < 1 || inputs > 40) return null;
+      return { steps, inputs };
+    }
+    function interactiveTail(realOut, steps) {
+      let out = realOut, pos = 0;
+      for (const s of steps) {
+        if (s.t !== 'out' || !s.text) continue;
+        const idx = out.indexOf(s.text, pos);
+        if (idx === -1) return null;
+        pos = idx + s.text.length;
+      }
+      return out.slice(pos);
+    }
+    function scrollConsole() { const el = $('consoleOut'); if (el && el.scrollHeight) el.scrollTop = el.scrollHeight; }
+    function newLine() {
+      const el = $('consoleOut'); const d = document.createElement('div');
+      d.className = 'pa-con'; el.appendChild(d); scrollConsole(); return d;
+    }
+    function addTextToLine(el, text) { if (!el) return; el.innerHTML += Utils.sanitize(String(text == null ? '' : text)); scrollConsole(); }
+    function showLiveInput(lineEl) {
+      removeLiveInput();
+      const inp = document.createElement('input');
+      inp.className = 'pa-li'; inp.id = 'liveInput';
+      inp.setAttribute('autocomplete', 'off'); inp.setAttribute('autocapitalize', 'off');
+      inp.setAttribute('autocorrect', 'off'); inp.setAttribute('spellcheck', 'false');
+      inp.placeholder = '';
+      inp.style.width = '3ch';
+      inp.addEventListener('input', () => { inp.style.width = Math.max(inp.value.length + 2, 3) + 'ch'; });
+      const blk = document.createElement('i'); blk.className = 'pa-blk';
+      lineEl.appendChild(inp); lineEl.appendChild(blk);
+      scrollConsole();
+      try { inp.focus(); } catch (e) {}
+    }
+    function removeLiveInput() {
+      const inp = document.getElementById('liveInput');
+      if (inp) inp.remove();
+      document.querySelectorAll('#consoleOut .pa-blk').forEach(b => b.remove());
+    }
+    function ioNext() {
+      while (ioStep < ioPlan.steps.length) {
+        const s = ioPlan.steps[ioStep];
+        if (s.t === 'out') {
+          if (!ioLineOpen || !ioLineEl) { ioLineEl = newLine(); ioLineOpen = true; }
+          addTextToLine(ioLineEl, s.text);
+          if (s.nl) ioLineOpen = false;
+          ioStep++;
+        } else if (s.t === 'dyn') {
+          if (!ioLineOpen || !ioLineEl) { ioLineEl = newLine(); }
+          ioLineOpen = false;
+          ioStep++;
+        } else {
+          if (!ioLineEl) ioLineEl = newLine();
+          ioLineOpen = false;
+          showLiveInput(ioLineEl);
+          ioStep++;
+          return;
+        }
+      }
+      finishInteractive();
+    }
+    function startInteractive(p, src, plan) {
+      ioActive = true; ioPlan = plan; ioStep = 0; ioUserInputs = [];
+      ioLineEl = null; ioLineOpen = false; ioP = p; ioSrc = src;
+      resetConsole();
+      ioNext();
+    }
+    function cancelInteractive() {
+      ioActive = false; ioPlan = null; ioStep = 0; ioUserInputs = []; ioP = null; ioSrc = '';
+      removeLiveInput();
+      appendConsole('— interaction cancelled —', 'muted');
+    }
+    function ioCommit(value) {
+      const inp = document.getElementById('liveInput');
+      if (!inp) return;
+      const val = value;
+      removeLiveInput();
+      addTextToLine(ioLineEl, ' ' + val);
+      ioUserInputs.push(val);
+      ioLineOpen = false;
+      ioNext();
+    }
+    function ioHandleKey(e) {
+      if (!ioActive) return;
+      const inp = document.getElementById('liveInput');
+      if (!inp) return;
+      if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); ioCommit(inp.value); }
+      else if (e.key === 'Escape') { e.preventDefault(); cancelInteractive(); }
+    }
+    document.addEventListener('keydown', ioHandleKey, true);
+
+    async function finishInteractive() {
+      const p = ioP, src = ioSrc;
+      setBusy(true);
+      $('btnRun').innerHTML = RUN_HTML + ' Running…';
+      removeLiveInput();
+      try {
+        await Programming.saveCode(ACTIVITY_ID, p.id, RUN_LANG, src);
+        lastSavedAt = Date.now(); updateSaveStatus();
+      } catch (e) { try { scheduleSave(); } catch (e2) { updateSaveStatus('error'); } }
+      const stdin = ioUserInputs.join('\n') + '\n';
+      try {
+        const res = await Programming.runInSandbox({ language: RUN_LANG, source: src, stdin, timeoutMs: 4000 });
+        if (res.compile_error) { appendConsole('Compilation Error', 'err'); appendConsole(res.compile_error || '', 'err'); }
+        else if (res.runtime_error) { appendConsole('Runtime Error — ' + (res.runtime_error || 'the program crashed'), 'err'); }
+        else if (res.status === 'tle') { appendConsole('Time Limit Exceeded (code ran too long)', 'err'); }
+        else {
+          const tail = interactiveTail(res.stdout || '', ioPlan ? ioPlan.steps : []);
+          const trimmed = String(tail == null ? '' : tail).replace(/^\s+|\s+$/g, '');
+          if (trimmed) { if (ioLineOpen && ioLineEl) addTextToLine(ioLineEl, ' ' + trimmed); else appendConsole(trimmed, 'ok'); }
+          appendConsole('Program finished successfully.', 'ok');
+        }
+      } catch (e) {
+        appendConsole('Could not run: ' + (e.message || 'unknown error'), 'err');
+      }
+      $('consoleHint').textContent = 'Program finished — press Run Code again or use Check Code to grade';
+      setBusy(false);
+      $('btnRun').innerHTML = RUN_HTML + ' Run Code';
+      ioActive = false; ioPlan = null; ioStep = 0; ioUserInputs = []; ioP = null; ioSrc = '';
+    }
+
+    async function runDirect(p, src) {
+      setBusy(true);
+      $('btnRun').innerHTML = RUN_HTML + ' Running…';
+      resetConsole();
       try {
         await Programming.saveCode(ACTIVITY_ID, p.id, RUN_LANG, src);
         lastSavedAt = Date.now(); updateSaveStatus();
@@ -811,23 +959,51 @@
         try { scheduleSave(); } catch (e2) { updateSaveStatus('error'); }
       }
       try {
-        const res = await Programming.runInSandbox({ language: RUN_LANG, source: src, stdin, timeoutMs: 4000 });
-        renderRunResult(res);
-        if (finalized) return;
-        appendConsole('-- checking against test cases --', 'muted');
+        const res = await Programming.runInSandbox({ language: RUN_LANG, source: src, stdin: '', timeoutMs: 4000 });
+        const failed = renderRunResult(res);
+        if (!failed) appendConsole('Program finished successfully.', 'ok');
+      } catch (e) {
+        appendConsole('Could not run: ' + (e.message || 'unknown error'), 'err');
+      }
+      $('consoleHint').textContent = 'Program finished — press Run Code again or use Check Code to grade';
+      $('btnRun').innerHTML = RUN_HTML + ' Run Code';
+      setBusy(false);
+    }
+
+    async function runCode() {
+      const p = PROBLEMS[CURRENT];
+      if (!p || checkingAll || LOCKED_OUT || finalized || $('btnRun').disabled || ioActive) return;
+      const src = getEditorValue();
+      if (!src || !src.trim()) { Utils.showToast('Write some code first', 'error'); return; }
+      currentCodeByProblem[p.id] = src;
+      const plan = extractIOPlan(src, RUN_LANG);
+      if (plan) { startInteractive(p, src, plan); return; }
+      await runDirect(p, src);
+    }
+
+    async function checkCode() {
+      const p = PROBLEMS[CURRENT];
+      if (!p || checkingAll || LOCKED_OUT || finalized || $('btnCheck').disabled || ioActive) return;
+      const src = getEditorValue();
+      if (!src || !src.trim()) { Utils.showToast('Write some code first', 'error'); return; }
+      currentCodeByProblem[p.id] = src;
+      setBusy(true);
+      resetConsole();
+      appendConsole('Checking against the activity test cases…', 'muted');
+      try {
+        await Programming.saveCode(ACTIVITY_ID, p.id, RUN_LANG, src);
+        lastSavedAt = Date.now(); updateSaveStatus();
+      } catch (e) { try { scheduleSave(); } catch (e2) { updateSaveStatus('error'); } }
+      try {
         const report = await Programming.checkCode({ activityId: ACTIVITY_ID, problem: p, source: src, language: RUN_LANG });
         rememberBest(p, report);
-        const st = STATUS_MAP[report.status] || STATUS_MAP.pending;
-        const pts = report.score || 0;
-        appendConsole((pts > 0 ? '✔ ' : '✖ ') + st.t + ' — ' + report.score + ' / ' + report.max_score + ' pts earned', pts > 0 ? 'ok' : 'err');
         refreshProgressCard();
         if (LIVE) await pushLiveScore();
+        openGradeOverlay(p, report);
       } catch (e) {
-        appendConsole('Could not run or grade: ' + (e.message || 'unknown error'), 'err');
+        appendConsole('Could not check: ' + (e.message || 'unknown error'), 'err');
       }
       setBusy(false);
-      $('btnRun').innerHTML = RUN_HTML + ' Run';
-      try { $('termInput').focus(); } catch (e) {}
     }
 
     // ---------- CHECK / GRADE ----------
@@ -858,12 +1034,11 @@
         const name = r.label ? r.label : (isSample ? 'Sample case' : 'Hidden case ' + hiddenIndex);
         const msgPill = '<span class="pa-row-msg m-' + msgClass(r.message) + '">' + Utils.sanitize(r.message || '') + '</span>';
         let sub = '';
-        if (isSample && !r.passed) {
-          sub = '<div class="pa-row-sub"><span class="pa-cmp">Expected:</span><span class="pa-cmp-pre">' + Utils.sanitize(r.expected || '') + '</span>' +
-                '<span class="pa-cmp">Your output:</span><span class="pa-cmp-pre">' + Utils.sanitize(r.output || '(no output)') + '</span></div>';
-        } else if (isSample && r.passed) {
-          sub = '<div class="pa-row-sub"><span class="pa-cmp">Output matched:</span><span class="pa-cmp-pre">' + Utils.sanitize(r.output || '') + '</span></div>';
-        } else if (!isSample && r.passed) {
+        if (isSample) {
+          sub = '<div class="pa-row-sub"><span class="pa-cmp">Input:</span><span class="pa-cmp-pre">' + Utils.sanitize(r.input || '(none)') + '</span>' +
+                '<span class="pa-cmp">Expected Output:</span><span class="pa-cmp-pre">' + Utils.sanitize(r.expected || '') + '</span>' +
+                '<span class="pa-cmp">Your Output:</span><span class="pa-cmp-pre">' + Utils.sanitize(r.output || '(no output)') + '</span></div>';
+        } else if (r.passed) {
           sub = '<div class="pa-row-sub">Hidden test case passed.</div>';
         } else {
           sub = '<div class="pa-row-sub">This hidden test case failed. Review your logic and edge cases, then check again.</div>';
@@ -1133,7 +1308,6 @@
         syncGutter(); updateCursor(); renderHighlight();
         await loadSamples(PROBLEMS[0]);
         refreshProgressCard();
-        try { $('termInput').focus(); } catch (e) {}
 
         if (LIVE) {
           if (LIVE_GAME && typeof supabaseClient.channel === 'function') {
