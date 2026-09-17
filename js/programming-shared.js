@@ -6,7 +6,8 @@
 //   - language configs
 //   - data loading (activities / problems / test cases)
 //   - code auto-save + resume
-//   - run / check (sandboxed execution via Edge Function)
+//   - run / check (sandboxed execution via the WQTech runner API
+//     at /api/programming-run, deployed on Vercel)
 //   - grading (sample + hidden cases, points, status)
 //   - timer (mm:ss countdown, auto-submit at zero)
 //   - result roll-up
@@ -22,15 +23,21 @@ window.Programming = (function () {
   const cx = (typeof supabaseClient !== 'undefined') ? supabaseClient : null;
 
   // ------------------------------------------------------------------
-  // LANGUAGE CONFIG (beginner scope - C, C++, C#, Java, Python)
-  // name matches the Piston API "language" field used by the runner.
+  // LANGUAGE CONFIG (beginner scope)
+  // `id` = what the UI stores; `piston` matches the Piston API language
+  // field; the server aliases these to the judge0 ids it needs.
   // ------------------------------------------------------------------
   const LANGUAGES = [
-    { id: 'c',      label: 'C',       piston: 'c',          ext: 'c',      starter: '// C starter code\n#include <stdio.h>\n\nint main() {\n    return 0;\n}\n' },
-    { id: 'cpp',    label: 'C++',     piston: 'c++',        ext: 'cpp',    starter: '// C++ starter code\n#include <iostream>\nusing namespace std;\n\nint main() {\n    return 0;\n}\n' },
-    { id: 'csharp', label: 'C#',      piston: 'csharp',     ext: 'cs',     starter: '// C# starter code\nusing System;\n\nclass Program {\n    static void Main() {\n        Console.WriteLine();\n    }\n}\n' },
-    { id: 'java',   label: 'Java',    piston: 'java',       ext: 'java',   starter: '// Java starter code\npublic class Main {\n    public static void main(String[] args) {\n        System.out.println();\n    }\n}\n' },
-    { id: 'python', label: 'Python',  piston: 'python',     ext: 'py',     starter: '# Python starter code\n\ndef main():\n    pass\n\nif __name__ == "__main__":\n    main()\n' }
+    { id: 'c',          label: 'C',          piston: 'c',          ext: 'c',      starter: '// C starter code\n#include <stdio.h>\n\nint main() {\n    return 0;\n}\n' },
+    { id: 'cpp',        label: 'C++',        piston: 'c++',        ext: 'cpp',    starter: '// C++ starter code\n#include <iostream>\nusing namespace std;\n\nint main() {\n    return 0;\n}\n' },
+    { id: 'csharp',     label: 'C#',         piston: 'csharp',     ext: 'cs',     starter: '// C# starter code\nusing System;\n\nclass Program {\n    static void Main() {\n        Console.WriteLine();\n    }\n}\n' },
+    { id: 'java',       label: 'Java',       piston: 'java',       ext: 'java',   starter: '// Java starter code\npublic class Main {\n    public static void main(String[] args) {\n        System.out.println();\n    }\n}\n' },
+    { id: 'python',     label: 'Python',     piston: 'python',     ext: 'py',     starter: '# Python starter code\n\ndef main():\n    pass\n\nif __name__ == "__main__":\n    main()\n' },
+    { id: 'javascript', label: 'JavaScript', piston: 'javascript', ext: 'js',     starter: '// JavaScript starter code\n\nfunction main() {\n    console.log("");\n}\n\nmain();\n' },
+    { id: 'typescript', label: 'TypeScript', piston: 'typescript', ext: 'ts',     starter: '// TypeScript starter code\nfunction main(): void {\n    try {\n        const input = require("fs").readFileSync(0, "utf8").trim().split(/\\s+/);\n        // Write your code here\n    } catch (e) {}\n}\n\nmain();\n' },
+    { id: 'go',         label: 'Go',         piston: 'go',         ext: 'go',     starter: '// Go starter code\npackage main\n\nimport (\n    "fmt"\n)\n\nfunc main() {\n    fmt.Println("")\n}\n' },
+    { id: 'rust',       label: 'Rust',       piston: 'rust',       ext: 'rs',     starter: '// Rust starter code\nfn main() {\n    println!("");\n}\n' },
+    { id: 'ruby',       label: 'Ruby',       piston: 'ruby',       ext: 'rb',     starter: '# Ruby starter code\n\nputs ""\n' }
   ];
 
   const langById = (id) => LANGUAGES.find(l => l.id === id) || LANGUAGES[1];
@@ -134,98 +141,21 @@ window.Programming = (function () {
     return null;
   }
 
-  // ------------------------------------------------------------------
-  // EXECUTION - sandboxed. NEVER run student code directly on this server.
-  // Preferred path is the Edge Function (supabase/functions/programming-run),
-  // which relays into a containerized judge (Judge0 CE). If it is not
-  // deployed, the browser automatically calls the public Judge0 CE sandbox
-  // directly, so the app keeps working out of the box.
-  // ------------------------------------------------------------------
-  const FUNCTIONS_BASE = (typeof SUPABASE_URL !== 'undefined')
-    ? SUPABASE_URL.replace(/\/$/, '') + '/functions/v1/programming-run'
-    : '';
-
-// Public Judge0 CE sandbox. Used as an automatic fallback so Run/Check
-  // works even before (without) the Supabase Edge Function being deployed.
-  const JUDGE0_PUBLIC = 'https://ce.judge0.com/submissions';
-
-  // Judge0 CE quota-safe execution limits. The public runner (and most
-  // self-hosted instances) reject out-of-range cpu/memory limits with an
-  // HTTP 400, so we clamp to values every CE instance accepts. The Edge
-  // Function applies the same clamps; override them server-side with the
-  // RUNNER_MAX_CPU_SECONDS / RUNNER_MEMORY_LIMIT_KB env vars.
-  const RUNNER_MAX_CPU_SECONDS = 3;
-  const RUNNER_MEMORY_LIMIT_KB = 128000;
-
-// Piston API (https://github.com/engineer-man/piston) — PRIMARY runner when
-// a Piston instance is configured. Point window.PISTON_BASE at your OWN
-// instance (e.g. "http://your-host:2000/api/v2/piston") once self-hosted
-// via Docker; the public emkc.org API is whitelist-only since 2/15/2026, so
-// it is never called by default. Piston posts source + stdin and runs to
-// completion using compile_timeout/run_timeout. It takes NO cpu/memory
-// limit params, so the out-of-range HTTP 400 simply cannot happen.
-// Runtime versions are fetched once per hour and cached, with local
-// defaults as a network-free fallback.
-  const PISTON_BASE = (typeof window !== 'undefined' && window.PISTON_BASE && String(window.PISTON_BASE).trim())
-    ? String(window.PISTON_BASE).trim().replace(/\/+$/, '')
-    : '';
-  const PISTON_RUNTIME_DEFAULTS = { c: '10.2.0', 'c++': '10.2.0', csharp: '6.12.0', java: '17.0.9', python: '3.10.0' };
-  let pistonRuntimes = null, pistonRuntimesAt = 0;
-
-  async function pistonVersion(pistonLang) {
-    if (!pistonRuntimes || Date.now() - pistonRuntimesAt > 3600000) {
-      try {
-        const r = await fetch(PISTON_BASE + '/runtimes');
-        if (r.ok) pistonRuntimes = await r.json();
-      } catch (e) { /* keep the previous cache (if any) */ }
-      pistonRuntimesAt = Date.now();
-    }
-    const versions = (pistonRuntimes || [])
-      .filter(x => x && x.language === pistonLang)
-      .map(x => x.version);
-    if (versions.length) {
-      return versions.slice().sort((a, b) => {
-        const pa = String(a).split(/[.\-]/).map(x => parseInt(x, 10) || 0);
-        const pb = String(b).split(/[.\-]/).map(x => parseInt(x, 10) || 0);
-        for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-          const va = pa[i] || 0, vb = pb[i] || 0;
-          if (va !== vb) return vb - va;
-        }
-        return 0;
-      })[0];
-    }
-    return PISTON_RUNTIME_DEFAULTS[pistonLang] || '';
-  }
-
-  function pistonFileName(pistonLang) {
-    if (pistonLang === 'java') return 'Main.java';
-    if (pistonLang === 'c++') return 'main.cpp';
-    if (pistonLang === 'csharp') return 'main.cs';
-    if (pistonLang === 'python') return 'main.py';
-    if (pistonLang === 'c') return 'main.c';
-    return 'main.txt';
-  }
-
-  // Accepts Piston language names (what RUN_LANG is set to) or the id forms.
-  function pistonLang(language) {
-    const l = String(language || '').toLowerCase();
-    if (l === 'c' || l === 'c++' || l === 'csharp' || l === 'java' || l === 'python') return l;
-    if (l === 'cpp' || l === 'cplusplus') return 'c++';
-    if (l === 'cs' || l === 'c#') return 'csharp';
-    if (l === 'python3' || l === 'py') return 'python';
-    return 'c++';
-  }
-
-  // App language -> Judge0 CE language_id (stable for the CE language set).
-  function judge0LangId(language) {
-    const l = String(language || '').toLowerCase();
-    if (l === 'c') return 50;
-    if (l === 'c++' || l === 'cplusplus' || l === 'cpp') return 54;
-    if (l === 'c#' || l === 'csharp' || l === 'cs') return 51;
-    if (l === 'java') return 62;
-    if (l === 'python' || l === 'python3') return 71;
-    return 54;
-  }
+// ------------------------------------------------------------------
+  // EXECUTION - sandboxed via the SECURE BACKEND ONLY.
+  // The browser NEVER talks to an execution provider directly. Every run
+//   goes to the WQTech runner API. Default: the same-origin Vercel
+//   function /api/programming-run (window.RUNNER_API_URL, set in
+//   js/piston-config.js). That API authenticates the user (Supabase
+//   JWT), maps the language, talks to the configured provider
+//   (Piston / Judge0 CE) server-side, normalizes the result and
+//   returns it here. Provider config, versions and keys live on the
+//   API server - not in this file and not in the browser (spec: no
+//   execution-api keys in the frontend). Untrusted student code never
+//   runs in this runtime.
+//   ------------------------------------------------------------------
+  const FUNCTIONS_BASE = (window.RUNNER_API_URL && String(window.RUNNER_API_URL))
+    || '';
 
   // Friendly language name for diagnostics / the Code Runner Error panel.
   function displayLang(language) {
@@ -235,6 +165,11 @@ window.Programming = (function () {
     if (l === 'c#' || l === 'csharp' || l === 'cs') return 'C#';
     if (l === 'java') return 'Java';
     if (l === 'python' || l === 'python3' || l === 'py') return 'Python';
+    if (l === 'javascript' || l === 'js' || l === 'node' || l === 'nodejs') return 'JavaScript';
+    if (l === 'typescript' || l === 'ts') return 'TypeScript';
+    if (l === 'go' || l === 'golang') return 'Go';
+    if (l === 'rust') return 'Rust';
+    if (l === 'ruby' || l === 'rb') return 'Ruby';
     return String(language || '');
   }
 
@@ -245,7 +180,13 @@ window.Programming = (function () {
   function normalizeRun(raw) {
     if (!raw || typeof raw !== 'object') return {};
 
-    // ---- Judge0 CE shape (public API / Edge Function relay) ----
+    // ---- Canonical shape returned by the backend adapter (programming-run
+    // edge function): { stdout, stderr, compile_error, compile_output,
+    // runtime_error, status: ''|'tle'|'mle', time_ms, provider, language,
+    // version }. Pass it through untouched.
+    if (typeof raw.status === 'string' && 'provider' in raw) return raw;
+
+    // ---- Judge0 CE shape (public API / legacy relay) ----
     if (raw.status && typeof raw.status === 'object' && 'id' in raw.status) {
       const sid = parseInt(raw.status.id, 10);
       const stdout = String(raw.stdout || '').replace(/\s+$/g, '');
@@ -315,21 +256,6 @@ window.Programming = (function () {
     return err;
   }
 
-  // Never send undefined/null/empty for required fields.
-  function requireRunnerFields(payload, names, provider) {
-    for (const n of names) {
-      const v = payload[n];
-      if (v === undefined || v === null || v === '') {
-        const err = new Error(provider + ' missing or invalid required field: ' + n);
-        err.kind = 'configuration';
-        err.status = null;
-        err.meta = { provider, field: n, payload: JSON.stringify(payload) };
-        console.error('Runner config error:', err.message, '\npayload:', JSON.stringify(payload));
-        throw err;
-      }
-    }
-  }
-
   // Full failure trace for the browser/Supabase console (spec requirement 1):
   // provider, language, version, source length, stdin, request payload (no
   // secrets), API URL, HTTP status and the real response body from the exec
@@ -351,101 +277,54 @@ window.Programming = (function () {
     } catch (e) {}
   }
 
-  async function runInPiston({ language, source, stdin, timeoutMs }) {
-    const provider = 'piston';
-    const t = Math.min(Math.max(parseInt(timeoutMs, 10) || 4000, 200), 20000);
-    const plang = pistonLang(language);
-    const version = await pistonVersion(plang);
-    const requestBody = {
-      language: plang,
-      version,
-      files: [{ name: pistonFileName(plang), content: source }],
-      stdin: stdin || '',
-      args: [],
-      compile_timeout: 10000,
-      run_timeout: t
-    };
-    requireRunnerFields(requestBody, ['language', 'version', 'files'], provider);
-    const url = PISTON_BASE + '/execute';
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
-    });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      const detail = (body && body.message) || (body && body.error) || (body && body.detail) || '';
-      logRunnerFailure(provider, { language: plang, version, sourceLength: source.length, stdin: stdin || '', requestBody, url, status: res.status, responseBody: JSON.stringify(body).slice(0, 2000) });
-      throw executionError(res.status, detail, { provider, language: displayLang(language), version, url, payload: requestBody, response: JSON.stringify(body).slice(0, 2000) });
-    }
-    return normalizeRun(await res.json());
-  }
-
   async function runInSandbox({ language, source, stdin, timeoutMs }) {
-    const t = parseInt(timeoutMs, 10) || 4000;
     if (!source) throw new Error('No code to run.');
-
-    // 1) PRIMARY (when configured): self-hosted Piston instance. Piston
-    //    takes NO cpu/memory limit params, so an out-of-range limit 400
-    //    cannot happen. Unreachable/rejected => log + fall through.
-    if (PISTON_BASE) {
-      try {
-        return await runInPiston({ language, source, stdin, timeoutMs: t });
-      } catch (e) {
-        if (e && (e.kind === 'execution' || e.kind === 'configuration')) console.error('piston runner -> ' + (e.message || 'failed'));
-      }
+    if (!FUNCTIONS_BASE) {
+      const err = executionError(0, 'The code runner backend is not configured for this site.', { provider: 'backend' });
+      throw err;
     }
-
-    // 2) Fallback: your own Supabase Edge Function (server -> judge0).
-    if (FUNCTIONS_BASE) {
-      try {
-        const controller = new AbortController();
-        const to = setTimeout(() => controller.abort(), Math.min(t + 8000, 20000));
-        const token = await getAccessToken();
-        const res = await fetch(FUNCTIONS_BASE, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-          body: JSON.stringify({ language, source, stdin: stdin || '', timeout_ms: t }),
-          signal: controller.signal
-        });
-        clearTimeout(to);
-        if (res.ok) return normalizeRun(await res.json());
-        const tErr = await res.text().catch(() => '');
-        logRunnerFailure('edge-function', { language: displayLang(language), version: null, sourceLength: source.length, stdin: stdin || '', requestBody: { language, source, stdin: stdin || '', timeout_ms: t }, url: FUNCTIONS_BASE, status: res.status, responseBody: tErr.slice(0, 2000) });
-        console.error('programming-run edge function -> HTTP ' + res.status + ': ' + tErr.slice(0, 300));
-      } catch (e) { /* unreachable / not deployed / CORS -> fall through to Judge0 */ }
+    const t = parseInt(timeoutMs, 10) || 4000;
+    const controller = new AbortController();
+    const to = setTimeout(() => controller.abort(), Math.min(t + 15000, 30000));
+    const token = await getAccessToken();
+    let res;
+    try {
+      res = await fetch(FUNCTIONS_BASE, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ language, source, stdin: stdin || '', timeout_ms: t }),
+        signal: controller.signal
+      });
+    } catch (e) {
+      clearTimeout(to);
+      logRunnerFailure('function', { language: displayLang(language), version: null, sourceLength: source.length, stdin: stdin || '', requestBody: { language, source }, url: FUNCTIONS_BASE, status: 0, responseBody: String(e && e.message || e) });
+      throw executionError(0, 'Runner unreachable: ' + (e && e.message || e), { provider: 'backend', language: displayLang(language), url: FUNCTIONS_BASE });
     }
+    clearTimeout(to);
+    let body;
+    try { body = await res.json(); } catch (e) { body = null; }
+    if (res.ok && body && body.ok && body.result) return normalizeRun(body.result);
 
-    // 3) Fallback: Judge0 CE directly from the browser. Limits are clamped
-    //    to values every CE instance accepts, which is what prevents the
-    //    out-of-range cpu/memory HTTP 400 in the first place.
-    const provider = 'judge0';
-    const langId = judge0LangId(language);
-    const requestBody = {
-      source_code: source,
-      language_id: langId,
-      stdin: stdin || '',
-      cpu_time_limit: Math.min(Math.max(Math.ceil(t / 1000), 1), RUNNER_MAX_CPU_SECONDS),
-      memory_limit: RUNNER_MEMORY_LIMIT_KB
-    };
-    requireRunnerFields(requestBody, ['source_code', 'language_id'], provider);
-    const url = JUDGE0_PUBLIC + '?base64_encoded=false&wait=true';
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(requestBody)
+    // Any non-200 / non-ok here is a categorized EXECUTION SERVICE ERROR
+    // (HTTP 400, provider down, auth, ...). It is never reported as the
+    // student's Wrong Answer / Compilation Error.
+    const err = (body && body.error) || {};
+    const detail = err.detail || err.message || '';
+    logRunnerFailure(err.provider || 'function', { language: displayLang(language), version: err.version || null, sourceLength: source.length, stdin: stdin || '', requestBody: { language, source, stdin: stdin || '', timeout_ms: t }, url: FUNCTIONS_BASE, status: res.status, responseBody: JSON.stringify(body || '').slice(0, 2000) });
+    throw executionError(res.status, detail, {
+      provider: err.provider || 'backend',
+      language: displayLang(language),
+      version: err.version || null,
+      url: FUNCTIONS_BASE,
+      payload: { language, source, stdin: stdin || '', timeout_ms: t },
+      response: JSON.stringify(body || '').slice(0, 2000)
     });
-    if (!res.ok) {
-      const body = await res.json().catch(() => ({}));
-      const detail = (body && body.message) || (body && body.error) || (body && body.detail) || '';
-      logRunnerFailure(provider, { language: displayLang(language), version: null, sourceLength: source.length, stdin: stdin || '', requestBody, url, status: res.status, responseBody: JSON.stringify(body).slice(0, 2000) });
-      throw executionError(res.status, detail, { provider, language: displayLang(language), version: null, url, payload: requestBody, response: JSON.stringify(body).slice(0, 2000) });
-    }
-    return normalizeRun(await res.json());
   }
 
-  // One test case => run => pass/fail
-  async function runSingleTestCase(problem, testCase, source, language) {
+  // One test case => run => pass/fail. Points come from the dynamic
+  // allocation (never hard-coded per test case); hidden cases never expose
+  // their input/expected answers to the student.
+  async function runSingleTestCase(problem, testCase, source, language, points, includedInGrading) {
     const started = Date.now();
     try {
       const run = await runInSandbox({
@@ -456,24 +335,32 @@ window.Programming = (function () {
       const out = normalizeOutput(run.stdout || '');
       const expected = normalizeOutput(testCase.expected_output || '');
       const passed = (run.compile_error || run.runtime_error
-                     || run.status === 'tle') ? false : (out === expected);
+                     || run.status === 'tle' || run.status === 'mle') ? false : (out === expected);
       return {
         test_case_id: testCase.id,
         label: testCase.label || '',
         input: testCase.is_sample ? (testCase.input || '') : 'Hidden',
         expected: testCase.is_sample ? (testCase.expected_output || '') : 'Hidden',
         output: testCase.is_sample ? (run.stdout || '') : '',
+        is_sample: !!testCase.is_sample,
+        included_in_grading: includedInGrading !== false,
         passed,
-        points: passed ? (testCase.points || 0) : 0,
+        points: passed ? (points || 0) : 0,
         runtime_ms: Date.now() - started,
         message: run.compile_error ? 'Compilation Error' :
                  run.runtime_error ? 'Runtime Error' :
-                 run.status === 'tle' ? 'Time Limit Exceeded' : (passed ? 'Passed' : 'Failed')
+                 run.status === 'mle' ? 'Memory Limit Exceeded' :
+                 run.status === 'tle' ? 'Time Limit Exceeded' : (passed ? 'Passed' : 'Failed'),
+        stdout: run.stdout || ''
       };
     } catch (e) {
-      return { test_case_id: testCase.id, label: testCase.label || '', input: '', expected: '',
-               output: '', passed: false, points: 0, runtime_ms: 0,
-               message: (e && e.message) || 'Runner unavailable' };
+      return {
+        test_case_id: testCase.id, label: testCase.label || '', input: '', expected: '',
+        is_sample: !!testCase.is_sample, included_in_grading: includedInGrading !== false,
+        output: '', passed: false, points: 0, runtime_ms: 0,
+        message: (e && e.kind === 'execution') ? 'Execution Service Error' : ((e && e.message) || 'Runner unavailable'),
+        stdout: ''
+      };
     }
   }
 
@@ -482,24 +369,49 @@ window.Programming = (function () {
     return String(s).replace(/\r\n/g, '\n').replace(/\s+$/g, '').trim();
   }
 
+  // Points are divided AUTOMATICALLY and EQUALLY among the test cases that
+  // are included in grading (spec: no hard-coded test case count). When the
+  // division has a remainder, the extra points go to the FIRST cases by sort
+  // order, so the sum always equals the problem's total points exactly.
+  function allocatePoints(totalPoints, count) {
+    const total = Math.max(0, Math.round(totalPoints || 0));
+    if (!count || count < 1) return [];
+    if (total <= 0) return new Array(count).fill(0);
+    const base = Math.floor(total / count);
+    const remainder = total - (base * count);
+    const points = new Array(count).fill(base);
+    for (let i = 0; i < remainder; i++) points[i] += 1;
+    return points;
+  }
+
   // ------------------------------------------------------------------
   // GRADING ("Check Code")
-  // Runs ALL test cases (sample + hidden). Hidden cases are graded but
-  // NEVER revealed to the student. Returns a full report + saves it.
+  // Runs the test cases the admin marked "include in grading" (sample +
+  // hidden). Hidden cases are graded but NEVER revealed to the student.
+  // Points = problem.points divided equally over the grading cases.
   // ------------------------------------------------------------------
   async function checkCode({ activityId, problem, source, language }) {
     const { allForGrading } = await getVisibleTestCases(problem.id);
+    const gradingCount = allForGrading.filter(t => t.include_in_grading !== false).length;
+    const allocated = allocatePoints(problem.points || 0, gradingCount);
     const results = [];
+    let gi = 0;
     for (const tc of allForGrading) {
-      results.push(await runSingleTestCase(problem, tc, source, language));
+      const graded = tc.include_in_grading !== false;
+      const points = graded ? (allocated[gi++] || 0) : 0;
+      results.push(await runSingleTestCase(problem, tc, source, language, points, graded));
     }
     const pointsEarned = results.reduce((a, r) => a + r.points, 0);
-    const pointsPossible = allForGrading.reduce((a, t) => a + (t.points || 0), 0);
-    const passedCount = results.filter(r => r.passed).length;
-    const allPassed = results.length > 0 && passedCount === results.length;
-    const status = (results.some(r => r.message === 'Compilation Error')) ? 'compilation_error'
+    const pointsPossible = Math.max(0, Math.round(problem.points || 0));
+    const gradedResults = results.filter(r => r.included_in_grading !== false);
+    const passedCount = gradedResults.filter(r => r.passed).length;
+    const allPassed = gradedResults.length > 0 && passedCount === gradedResults.length;
+    // Service failure is NEVER the student's wrong answer / compile error.
+    const status = (results.some(r => r.message === 'Execution Service Error')) ? 'execution_service_error'
+                 : (results.some(r => r.message === 'Compilation Error')) ? 'compilation_error'
                  : (results.some(r => r.message === 'Runtime Error')) ? 'runtime_error'
                  : (results.some(r => r.message === 'Time Limit Exceeded')) ? 'time_limit_exceeded'
+                 : (results.some(r => r.message === 'Memory Limit Exceeded')) ? 'memory_limit_exceeded'
                  : allPassed ? 'accepted' : 'wrong_answer';
 
     const report = {
@@ -507,6 +419,7 @@ window.Programming = (function () {
       status,
       score: pointsEarned,
       max_score: pointsPossible,
+      grading_count: gradingCount,
       sample_passed: results.filter((r, i) => allForGrading[i].is_sample && r.passed).length,
       sample_total: results.filter((r, i) => allForGrading[i].is_sample).length,
       hidden_passed: results.filter((r, i) => !allForGrading[i].is_sample && r.passed).length,
@@ -526,7 +439,7 @@ window.Programming = (function () {
         activity_id: activityId, problem_id: problem.id, student_id: uid(),
         language, source_code: source
       }, { onConflict: 'activity_id,problem_id,student_id' });
-      await cx.from('programming_submissions').insert({
+      const { data: sub, error: subErr } = await cx.from('programming_submissions').insert({
         activity_id: activityId, problem_id: problem.id, student_id: uid(),
         student_name: (Auth && Auth.currentUser && Auth.currentUser.user_metadata &&
                        Auth.currentUser.user_metadata.name) || '',
@@ -535,9 +448,28 @@ window.Programming = (function () {
         sample_passed: report.sample_passed, sample_total: report.sample_total,
         hidden_passed: report.hidden_passed, hidden_total: report.hidden_total,
         test_results: report.test_results,
-        runtime_ms: report.test_results.reduce((a, r) => a + r.runtime_ms, 0)
-      });
-    } catch (e) {}
+        runtime_ms: report.test_results.reduce((a, r) => a + (r.runtime_ms || 0), 0)
+      }).select('id').single();
+      if (subErr) throw subErr;
+      if (sub && sub.id) {
+        const rows = (report.test_results || [])
+          .filter(r => r.test_case_id)
+          .map(r => ({
+            submission_id: sub.id,
+            test_case_id: r.test_case_id,
+            status: r.passed ? 'passed' : (r.message === 'Compilation Error' ? 'compilation_error'
+                        : r.message === 'Runtime Error' ? 'runtime_error'
+                        : r.message === 'Time Limit Exceeded' ? 'time_limit_exceeded'
+                        : r.message === 'Memory Limit Exceeded' ? 'memory_limit_exceeded'
+                        : r.message === 'Execution Service Error' ? 'execution_service_error'
+                        : 'failed'),
+            actual_output: r.is_sample ? (r.stdout || '') : '',
+            execution_time: r.runtime_ms || 0,
+            points_earned: r.points || 0
+          }));
+        if (rows.length) await cx.from('programming_test_results').insert(rows);
+      }
+    } catch (e) { console.error('saveSubmission failed', e); }
   }
 
   // ------------------------------------------------------------------
@@ -597,6 +529,6 @@ window.Programming = (function () {
     saveCode, loadSavedCode,
     runInSandbox, checkCode, finalizeActivity,
     startTimer,
-    normalizeOutput
+    normalizeOutput, allocatePoints
   };
 })();

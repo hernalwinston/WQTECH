@@ -228,6 +228,7 @@
           '</div>' +
           '<div class="prog-tc-bar">' +
             '<strong class="prog-grow" style="font-size:0.88rem; color:var(--text-secondary);">Test Cases</strong>' +
+            '<span class="prog-hint" style="margin-left:10px;">Points are divided equally among the test cases you include in grading.</span>' +
             '<button class="prog-btn prog-btn-sm" style="border:1px solid #10B981; color:#059669; background:transparent;" onclick="addTestCase(this, true)">+ Sample</button>' +
             '<button class="prog-btn prog-btn-sm" style="border:1px solid #F59E0B; color:#B45309; background:transparent;" onclick="addTestCase(this, false)">+ Hidden</button>' +
           '</div>' +
@@ -250,13 +251,13 @@
       const tag = isSample
         ? '<span class="prog-tc-chip">Sample</span>'
         : '<span class="prog-hidden-tag">&#128274; HIDDEN</span>';
-      row.innerHTML =
+row.innerHTML =
         '<div class="prog-tc-head">' +
           '<span class="prog-tc-title">' + (isSample ? 'Sample Test Case' : 'Hidden Test Case') + '</span>' +
           tag +
           '<span class="prog-grow"></span>' +
-          '<label style="display:flex; align-items:center; gap:6px; font-size:0.75rem; color:var(--text-muted);">Points ' +
-            '<input type="number" class="form-control prog-tc-points" min="0" step="1" value="' + (initial.points || 0) + '">' +
+          '<label style="display:flex;align-items:center;gap:6px;font-size:0.75rem;color:var(--text-muted);cursor:pointer;" title="Graded points are divided equally among the test cases you include.">Include in grading ' +
+            '<input type="checkbox" class="prog-tc-graded" ' + (initial.include_in_grading !== false ? 'checked' : '') + '>' +
           '</label>' +
           '<button class="prog-btn prog-btn-danger prog-btn-sm" onclick="removeTestCase(this)">Remove</button>' +
         '</div>' +
@@ -323,9 +324,9 @@
             label: isSample ? 'Sample ' + sampleIdx : 'Hidden ' + hiddenIdx,
             input: row.querySelector('.tc-input').value,
             expected_output: row.querySelector('.tc-output').value,
-            points: parseInt(row.querySelector('.prog-tc-points').value, 10) || 0,
             is_sample: isSample,
             is_hidden: !isSample,
+            include_in_grading: row.querySelector('.prog-tc-graded').checked,
             sort_order: i
           };
         });
@@ -349,9 +350,12 @@
       if (!problems.length) return 'Add at least one problem';
       for (let i = 0; i < problems.length; i++) {
         if (!problems[i].title) return 'Problem ' + (i + 1) + ': enter a title';
+        if (!problems[i].testCases.length) return 'Problem ' + (i + 1) + ': add at least one test case';
+        if (!problems[i].testCases.some(t => t.include_in_grading)) return 'Problem ' + (i + 1) + ': include at least one test case in grading (points need a grading pool)';
         for (const t of problems[i].testCases) {
-          if (!String(t.expected_output).trim()) return 'Problem ' + (i + 1) + ': every test case needs an Expected Output';
+          if (t.include_in_grading && !String(t.expected_output).trim()) return 'Problem ' + (i + 1) + ': every graded test case needs an Expected Output';
         }
+        if ((problems[i].points || 0) <= 0) return 'Problem ' + (i + 1) + ': enter the problem points (they are divided equally among the graded test cases)';
       }
       return null;
     }
@@ -408,8 +412,10 @@
           for (const tc of p.testCases) {
             const tcPayload = {
               problem_id: pid, label: tc.label, input: tc.input,
-              expected_output: tc.expected_output, points: tc.points,
-              is_sample: tc.is_sample, is_hidden: tc.is_hidden, sort_order: tc.sort_order
+              expected_output: tc.expected_output,
+              is_sample: tc.is_sample, is_hidden: tc.is_hidden,
+              include_in_grading: tc.include_in_grading !== false,
+              sort_order: tc.sort_order
             };
             if (tc.id) {
               const { error } = await supabaseClient.from('programming_test_cases').update(tcPayload).eq('id', tc.id);

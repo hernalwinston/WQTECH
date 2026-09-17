@@ -757,6 +757,7 @@
         failed = true;
       }
       if (res.time_limit_exceeded || res.status === 'tle') { appendConsole('Time Limit Exceeded (code ran too long)', 'err'); failed = true; }
+      if (res.memory_limit_exceeded || res.status === 'mle') { appendConsole('Memory Limit Exceeded (used too much memory)', 'err'); failed = true; }
       if (!failed && res.stderr) appendConsole(res.stderr, 'warn');
       if (res.stdout) { appendConsole('-- program output --', 'muted'); appendConsole(res.stdout, 'ok'); }
       if (!failed && !res.stdout && !res.stderr && !res.compile_error) appendConsole('Run finished with no output.', 'muted');
@@ -991,6 +992,7 @@
         finishConsole(); await deactivateInteractive(); return;
       }
       if (res.status === 'tle' || (probe && probe.status === 'tle')) { appendConsole('Time Limit Exceeded (code ran too long)', 'err'); finishConsole(); await deactivateInteractive(); return; }
+      if (res.status === 'mle' || (probe && probe.status === 'mle')) { appendConsole('Memory Limit Exceeded (used too much memory)', 'err'); finishConsole(); await deactivateInteractive(); return; }
       const srcOut = String((probe || res).stdout || '');
       const tail = interactiveTail(srcOut, ioPlan ? ioPlan.steps : []);
       const trimmed = trimOut(tail == null ? (res.stdout || '') : tail);
@@ -1068,12 +1070,14 @@
       compilation_error: { t: 'Compilation Error', c: 'err' },
       runtime_error: { t: 'Runtime Error', c: 'err' },
       time_limit_exceeded: { t: 'Time Limit Exceeded', c: 'warn' },
+      memory_limit_exceeded: { t: 'Memory Limit Exceeded', c: 'warn' },
+      execution_service_error: { t: 'Execution Service Error', c: 'err' },
       pending: { t: 'Pending', c: 'warn' }
     };
     function msgClass(m) {
       if (m === 'Passed') return 'pass';
       if (m === 'Failed') return 'fail';
-      if (m === 'Compilation Error' || m === 'Runtime Error') return 'err';
+      if (m === 'Compilation Error' || m === 'Runtime Error' || m === 'Execution Service Error') return 'err';
       return 'warn';
     }
     function openGradeOverlay(p, report) {
@@ -1081,7 +1085,9 @@
       $('gradeStatusPill').textContent = st.t;
       $('gradeStatusPill').className = 'pa-status-pill st-' + st.c;
       const results = report.test_results || [];
-      const passed = results.filter(r => r.passed).length;
+      const graded = results.filter(r => r.included_in_grading !== false);
+      const passed = graded.filter(r => r.passed).length;
+      const gradeTotal = (report.grading_count != null) ? report.grading_count : graded.length;
       let rows = '', hiddenIndex = 0;
       results.forEach((r) => {
         const isSample = r.expected !== 'Hidden';
@@ -1101,11 +1107,11 @@
         rows += '<div class="pa-row ' + (r.passed ? 'passed' : 'failed') + '">' +
           '<span class="pa-ico ' + (r.passed ? 'pass' : 'fail') + '">' + (r.passed ? '✓' : '✗') + '</span>' +
           '<div class="pa-row-main"><div class="pa-row-title">' + Utils.sanitize(name) + ' ' + msgPill + '</div>' + sub + '</div>' +
-          '<span class="pa-row-pts">+' + (r.points || 0) + ' pts</span>' +
+          '<span class="pa-row-pts">' + (r.included_in_grading === false ? 'Not graded' : ('+' + (r.points || 0) + ' pts')) + '</span>' +
         '</div>';
       });
       $('gradeBody').innerHTML = rows || '<p class="pa-empty">No test cases in this problem.</p>';
-      $('gradePassed').innerHTML = passed + ' / ' + results.length + ' <small>Test cases passed</small>';
+      $('gradePassed').innerHTML = passed + ' / ' + gradeTotal + ' <small>Test cases passed</small>';
       $('gradeScore').innerHTML = 'Score: ' + (report.score || 0) + ' / ' + (report.max_score || 0) + ' <small>points</small>';
       $('gradeOverlay').classList.add('active');
     }

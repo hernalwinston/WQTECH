@@ -56,14 +56,27 @@ The whole system shares one design language:
 2. Turn **OFF** "Confirm email"
 3. Click Save
 
-### Step 3 (optional): Deploy the code runner
-Run/Check code works out of the box through the **public Judge0 CE sandbox** (`ce.judge0.com`, CORS-open, no key). For the recommended server-side grader (rate-limit safe, self-hostable later), deploy the included Edge Function once:
+### Step 3 (required): Deploy the secure code runner API to Vercel
+Run/Check code goes through the **WQTech runner API** at `/api/programming-run` (`api/programming-run.js`), deployed together with this site on **Vercel**. It is the secure backend/adapter: it authenticates the caller, maps languages (C, C++, C#, Java, Python, JavaScript, TypeScript, Go, Rust, Ruby), talks to the execution provider server-side and normalizes results — the browser never calls a provider directly and no provider key is ever exposed to the frontend. **Supabase is used only for database / storage / authentication.**
 
 ```
-npx supabase functions deploy programming-run --project-ref rknsbfykyulrejnbwjuf
+vercel            # or: push the repo to GitHub and import it in Vercel
 ```
 
-The browser tries this function first and falls back to the public Judge0 CE instance automatically, so you can deploy it at any time.
+Make sure `SUPABASE_URL` is the same project the site already uses (`https://rknsbfykyulrejnbwjuf.supabase.co`).
+
+Configure providers in **Vercel → Project → Settings → Environment Variables**:
+
+- `SUPABASE_URL` — `https://rknsbfykyulrejnbwjuf.supabase.co` (used to verify the caller's JWT; required unless `RUNNER_SKIP_AUTH=1`)
+- `RUNNER_PROVIDER` — `auto | piston | judge0` (default `auto`)
+- `PISTON_BASE_URL` — e.g. `https://piston.your-domain.com/api/v2` (self-hosted Piston; the primary recommended provider — no cpu/memory limit params, so the old out-of-range HTTP 400 cannot happen)
+- `JUDGE0_URL` — self-hosted Judge0 CE `http://host:2358/submissions`; if unset the public CE instance is used as the last-resort fallback with quota-safe clamped limits
+- `JUDGE0_API_KEY` — Judge0 CE admin key (kept server-side only)
+- `RUNNER_SKIP_AUTH` — leave unset in production (only `1` to allow unauthenticated calls during testing)
+
+Sanity check after deploy: open `<your-vercel-url>/api/programming-run/health`.
+
+Optionally run `supabase/seed-programming.sql` in the Supabase SQL Editor to create the "C++ Basic Programming" demo activity (Sum of N Integers, 20 pts, 4 samples + 2 hidden cases). Seed data is idempotent. No Supabase Edge Functions or CLI are required.
 
 ---
 

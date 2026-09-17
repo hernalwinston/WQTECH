@@ -1,87 +1,124 @@
 // ============================================================
-// PROGRAMMING RUNNER - WQTech Backend / Code Runner Adapter
+// PROGRAMMING RUNNER - WQTech Backend API (Vercel Function)
 // ============================================================
-// This is WQTech's SECURE execution API. It does NOT compile or
-// run any code itself ("Supabase is the database, not a compiler").
-// It is a thin adapter that:
-//     1. authenticates the caller (Supabase JWT)
+// Deployed at:  /api/programming-run
+//
+// This is WQTech's SECURE execution API. It does NOT compile/run
+// code itself (Supabase is the database, NOT a compiler). It is a
+// thin adapter that:
+//     1. authenticates the caller (Supabase JWT, RS256 JWKS)
 //     2. maps app language -> provider language/version
 //     3. builds the provider-specific request (Piston OR Judge0)
 //     4. normalizes the provider response into ONE result shape
-//     5. classifies failures as Execution Service Errors (never
-//        as the student's Wrong Answer / Compilation Error)
+//     5. classifies failures as Execution Service Errors (never as
+//        the student's Wrong Answer / Compilation Error)
 //
-// Provider config & secret keys live HERE as env vars - never in
-// the browser. Configure in Supabase Dashboard -> Edge Functions:
+// PROVIDER CONFIG + KEYS live HERE as Vercel environment variables,
+// never in the browser. Set them in Vercel -> Settings -> Env Vars:
 //
-//   RUNNER_PROVIDER     auto | piston | judge0      (default auto)
-//   PISTON_BASE_URL     https://piston.your-host.com/api/v2
-//                       (self-hosted Piston; primary in auto mode)
-//   RUNNER_URL          http://your-host:2358/submissions
-//                       (self-hosted Judge0 CE; else the public
-//                        ce.judge0.com fallback is used)
-//   RUNNER_API_KEY      your Judge0 CE admin key (X-Api-Key)
-//   RUNNER_MAX_CPU_SECONDS  1..10 (default 3)  -- safe CE range
-//   RUNNER_MEMORY_LIMIT_KB  25600..512000 (default 128000)
+//   SUPABASE_URL          https://<project>.supabase.co (for JWT auth)
+//   RUNNER_SKIP_AUTH      1 = allow calls without a JWT (dev only)
+//   RUNNER_PROVIDER       auto | piston | judge0     (default auto)
+//   PISTON_BASE_URL       https://piston.your-host.com/api/v2
+//                         (self-hosted Piston; primary in auto mode)
+//   JUDGE0_URL            http://your-host:2358/submissions
+//                         (self-hosted Judge0 CE; else the public
+//                          ce.judge0.com fallback is used)
+//   JUDGE0_API_KEY        your Judge0 CE admin key (X-Api-Key)
+//   RUNNER_MAX_CPU_SECONDS 1..10 (default 3)  -- safe CE range (the
+//                         out-of-range value that caused the old HTTP 400)
+//   RUNNER_MEMORY_LIMIT_KB 25600..512000 (default 128000)
 //   RUNNER_COMPILE_TIMEOUT_MS      (default 10000)
 //   RUNNER_RUN_TIMEOUT_MS         (default 10000)
+//   RUNNER_HARD_TIMEOUT_MS        (default 25000, server-side cap)
 //   RUNNER_MAX_OUTPUT_BYTES       (default 200000)
-//   RUNNER_SKIP_AUTH     1 = allow calls without a JWT (dev only)
+//   SUPABASE_JWT_SECRET   optional legacy HS256 fallback key
 //
-// Deploy:  npx supabase functions deploy programming-run --project-ref <ref>
+// Depends on: jose (declared in package.json) for JWT verification.
+// Requires Node 18+ (global fetch). Runtime set in vercel.json.
 // ============================================================
 
-import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
-import { createRemoteJWKSet, jwtVerify } from "https://esm.sh/jose@5.9.6";
+const { createRemoteJWKSet, jwtVerify } = require("jose");
 
-const SUPABASE_URL = (Deno.env.get("SUPABASE_URL") || "").replace(/\/+$/, "");
-const SKIP_AUTH = Deno.env.get("RUNNER_SKIP_AUTH") === "1";
+const env = (k, d) => process.env[k] !== undefined ? process.env[k] : d;
+const SUPABASE_URL = (env("SUPABASE_URL", "") || "").replace(/\/+$/, "");
+const SKIP_AUTH = env("RUNNER_SKIP_AUTH", "0") === "1";
+const SUPABASE_JWT_SECRET = env("SUPABASE_JWT_SECRET", "") || "";
 
 const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Origin": env("ALLOW_ORIGIN", "*"),
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
 };
 
-function json(body, status) {
-  return new Response(JSON.stringify(body), {
-    status: status || 200,
-    headers: { ...corsHeaders, "Content-Type": "application/json" },
-  });
+function cors(res, extra) {
+  Object.keys(corsHeaders).forEach((k) => res.setHeader(k, corsHeaders[k]));
+  if (extra) Object.keys(extra).forEach((k) => res.setHeader(k, extra[k]));
+}
+
+function json(res, body, status) {
+  cors(res, { "Content-Type": "application/json" });
+  res.statusCode = status || 200;
+  res.end(JSON.stringify(body));
 }
 
 // ------------------------------------------------------------------
 // AUTH - every execution requires a valid Supabase session token so
-// the provider quota/keys are only ever usable by signed-in users.
+// provider quota/keys are only usable by signed-in users.
 // ------------------------------------------------------------------
 let jwks = null;
 async function verifyJwt(authorization) {
   if (SKIP_AUTH) return { ok: true };
   const token = String(authorization || "").replace(/^Bearer\s+/i, "").trim();
   if (!token) return { ok: false, reason: "missing bearer token" };
-  if (!SUPABASE_URL) return { ok: false, reason: "SUPABASE_URL unset" };
+  if (!SUPABASE_URL && !SUPABASE_JWT_SECRET)
+    return { ok: false, reason: "SUPABASE_URL (or SUPABASE_JWT_SECRET) unset" };
   try {
-    if (!jwks) {
-      jwks = createRemoteJWKSet(new URL(SUPABASE_URL + "/auth/v1/.well-known/jwks.json"));
+    if (SUPABASE_URL) {
+      if (!jwks) {
+        jwks = createRemoteJWKSet(new URL(SUPABASE_URL + "/auth/v1/.well-known/jwks.json"));
+      }
+      try {
+        const { payload } = await jwtVerify(token, jwks, { algorithms: ["RS256"] });
+        if (!payload || !payload.sub) return { ok: false, reason: "token has no subject" };
+        return { ok: true, sub: String(payload.sub), role: String(payload.role || "authenticated") };
+      } catch (rsErr) {
+        if (!SUPABASE_JWT_SECRET) throw rsErr;
+        // Fall back to legacy HS256 verification for older auth setup.
+        const { importJWK } = require("jose");
+        const key = await importJWK({ kty: "oct", k: Buffer.from(SUPABASE_JWT_SECRET).toString("base64url") }, "HS256");
+        const { payload } = await jwtVerify(token, key, { algorithms: ["HS256"] });
+        if (!payload || !payload.sub) return { ok: false, reason: "token has no subject" };
+        return { ok: true, sub: String(payload.sub), role: String(payload.role || "authenticated"), legacy: true };
+      }
     }
-    const { payload } = await jwtVerify(token, jwks, { algorithms: ["RS256"] });
+    // HS256-only mode (no SUPABASE_URL)
+    const { importJWK } = require("jose");
+    const key = await importJWK({ kty: "oct", k: Buffer.from(SUPABASE_JWT_SECRET).toString("base64url") }, "HS256");
+    const { payload } = await jwtVerify(token, key, { algorithms: ["HS256"] });
     if (!payload || !payload.sub) return { ok: false, reason: "token has no subject" };
-    return { ok: true, sub: String(payload.sub), role: String(payload.role || "authenticated") };
+    return { ok: true, sub: String(payload.sub), role: String(payload.role || "authenticated"), legacy: true };
   } catch (e) {
     return { ok: false, reason: e instanceof Error ? e.message : String(e) };
   }
 }
 
 // ------------------------------------------------------------------
-// LANGUAGE REGISTRY - the ONE place that maps app languages to every
-// provider. Adding a language = adding a row here.
+// LANGUAGE REGISTRY - the ONE place mapping app languages to every
+// provider. Adding a language = adding a row here + a client entry.
+// judge0 = Judge0 CE language_id; piston = Piston "language" field.
 // ------------------------------------------------------------------
 const LANGS = {
-  c:      { label: "C",      judge0: 50, piston: "c",      file: "main.c",    version: "10.2.0" },
-  cpp:    { label: "C++",    judge0: 54, piston: "c++",    file: "main.cpp",  version: "10.2.0" },
-  csharp: { label: "C#",     judge0: 51, piston: "csharp", file: "main.cs",   version: "6.12.0" },
-  java:   { label: "Java",   judge0: 62, piston: "java",   file: "Main.java", version: "17.0.9" },
-  python: { label: "Python", judge0: 71, piston: "python", file: "main.py",   version: "3.10.0" },
+  c:         { label: "C",         judge0: 50, piston: "c",         file: "main.c",    version: "10.2.0" },
+  cpp:       { label: "C++",       judge0: 54, piston: "c++",       file: "main.cpp",  version: "10.2.0" },
+  csharp:    { label: "C#",        judge0: 51, piston: "csharp",    file: "main.cs",   version: "6.12.0" },
+  java:      { label: "Java",      judge0: 62, piston: "java",      file: "Main.java", version: "17.0.9" },
+  python:    { label: "Python",    judge0: 71, piston: "python",    file: "main.py",   version: "3.10.0" },
+  javascript:{ label: "JavaScript", judge0: 63, piston: "javascript", file: "main.js",  version: "18.15.0" },
+  typescript:{ label: "TypeScript",judge0: 74, piston: "typescript", file: "main.ts",  version: "5.0.3" },
+  go:        { label: "Go",        judge0: 60, piston: "go",        file: "main.go",   version: "1.21.1" },
+  rust:      { label: "Rust",      judge0: 73, piston: "rust",      file: "main.rs",   version: "1.68.2" },
+  ruby:      { label: "Ruby",      judge0: 72, piston: "ruby",      file: "main.rb",   version: "3.0.1" },
 };
 
 function resolveLang(language) {
@@ -90,21 +127,25 @@ function resolveLang(language) {
   if (l === "c++" || l === "cplusplus" || l === "cpp") return { key: "cpp", cfg: LANGS.cpp };
   if (l === "cs" || l === "c#") return { key: "csharp", cfg: LANGS.csharp };
   if (l === "python3" || l === "py") return { key: "python", cfg: LANGS.python };
+  if (l === "js" || l === "node" || l === "nodejs") return { key: "javascript", cfg: LANGS.javascript };
+  if (l === "ts") return { key: "typescript", cfg: LANGS.typescript };
+  if (l === "golang") return { key: "go", cfg: LANGS.go };
   return null;
 }
 
 // ------------------------------------------------------------------
 // CONFIG (server-side only - never exposed to the browser)
 // ------------------------------------------------------------------
-const PROVIDER = (Deno.env.get("RUNNER_PROVIDER") || "auto").toLowerCase();
-const PISTON_BASE_URL = (Deno.env.get("PISTON_BASE_URL") || "").replace(/\/+$/, "");
-const RUNNER_URL = (Deno.env.get("RUNNER_URL") || "").replace(/\/+$/, "") || "https://ce.judge0.com/submissions";
-const RUNNER_API_KEY = Deno.env.get("RUNNER_API_KEY") || "";
-const RUNNER_MAX_CPU_SECONDS = Math.min(Math.max(parseInt(Deno.env.get("RUNNER_MAX_CPU_SECONDS") || "3", 10) || 3, 1), 10);
-const RUNNER_MEMORY_LIMIT_KB = Math.min(Math.max(parseInt(Deno.env.get("RUNNER_MEMORY_LIMIT_KB") || "128000", 10) || 128000, 25600), 512000);
-const RUNNER_COMPILE_TIMEOUT_MS = Math.max(parseInt(Deno.env.get("RUNNER_COMPILE_TIMEOUT_MS") || "10000", 10) || 10000, 1000);
-const RUNNER_RUN_TIMEOUT_MS = Math.max(parseInt(Deno.env.get("RUNNER_RUN_TIMEOUT_MS") || "10000", 10) || 10000, 500);
-const RUNNER_MAX_OUTPUT_BYTES = Math.max(parseInt(Deno.env.get("RUNNER_MAX_OUTPUT_BYTES") || "200000", 10) || 200000, 1000);
+const PROVIDER = (env("RUNNER_PROVIDER", "auto") || "auto").toLowerCase();
+const PISTON_BASE_URL = (env("PISTON_BASE_URL", "") || "").replace(/\/+$/, "");
+const RUNNER_URL = ((env("JUDGE0_URL", "") || env("RUNNER_URL", "") || "").replace(/\/+$/, "")) || "https://ce.judge0.com/submissions";
+const RUNNER_API_KEY = env("JUDGE0_API_KEY", "") || env("RUNNER_API_KEY", "") || "";
+const RUNNER_MAX_CPU_SECONDS = Math.min(Math.max(parseInt(env("RUNNER_MAX_CPU_SECONDS", "3"), 10) || 3, 1), 10);
+const RUNNER_MEMORY_LIMIT_KB = Math.min(Math.max(parseInt(env("RUNNER_MEMORY_LIMIT_KB", "128000"), 10) || 128000, 25600), 512000);
+const RUNNER_COMPILE_TIMEOUT_MS = Math.max(parseInt(env("RUNNER_COMPILE_TIMEOUT_MS", "10000"), 10) || 10000, 1000);
+const RUNNER_RUN_TIMEOUT_MS = Math.max(parseInt(env("RUNNER_RUN_TIMEOUT_MS", "10000"), 10) || 10000, 500);
+const RUNNER_HARD_TIMEOUT_MS = Math.max(parseInt(env("RUNNER_HARD_TIMEOUT_MS", "25000"), 10) || 25000, 5000);
+const RUNNER_MAX_OUTPUT_BYTES = Math.max(parseInt(env("RUNNER_MAX_OUTPUT_BYTES", "200000"), 10) || 200000, 1000);
 
 const trimEnd = (s) => String(s == null ? "" : s).replace(/\s+$/g, "");
 const truncate = (s, n) => {
@@ -152,8 +193,9 @@ async function pistonVersion(lang, fallback) {
 }
 
 // ------------------------------------------------------------------
-// PROVIDER: PISTON (self-hosted) - compile_timeout/run_timeout are ms,
-// takes stdout+stdin, returns { compile, run }, no cpu/memory params.
+// PROVIDER: PISTON (self-hosted) - compile_timeout/run_timeout in MS.
+// Takes stdout + stdin, no cpu/memory limit params (so the old
+// out-of-range HTTP 400 cannot happen).
 // ------------------------------------------------------------------
 async function runPiston({ lang, source, stdin, runTimeoutMs, version }) {
   const started = Date.now();
@@ -168,7 +210,7 @@ async function runPiston({ lang, source, stdin, runTimeoutMs, version }) {
     run_timeout: Math.min(Math.max(runTimeoutMs, 200), RUNNER_RUN_TIMEOUT_MS),
   };
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), RUNNER_COMPILE_TIMEOUT_MS + RUNNER_RUN_TIMEOUT_MS + 8000);
+  const timer = setTimeout(() => controller.abort(), RUNNER_HARD_TIMEOUT_MS);
   let res;
   try {
     res = await fetch(endpoint, {
@@ -182,8 +224,7 @@ async function runPiston({ lang, source, stdin, runTimeoutMs, version }) {
   }
   const text = await res.text().catch(() => "");
   if (!res.ok) {
-    const err = { status: res.status, body: text.slice(0, 1000) };
-    return { error: err, response: text.slice(0, 2000) };
+    return { error: { status: res.status, body: text.slice(0, 1000) }, response: text.slice(0, 2000) };
   }
   let d;
   try { d = JSON.parse(text); } catch (e) { d = {}; }
@@ -215,7 +256,7 @@ async function runPiston({ lang, source, stdin, runTimeoutMs, version }) {
 // ------------------------------------------------------------------
 // PROVIDER: JUDGE0 CE - language_id + cpu_time_limit + memory_limit.
 // cpu/memory are clamped to the safe CE range (this is the fix for
-// the old out-of-range HTTP 400).
+// the out-of-range HTTP 400).
 // ------------------------------------------------------------------
 async function runJudge0({ lang, source, stdin, runTimeoutMs, timeoutMs }) {
   const baseLangId = LANGS[lang].judge0;
@@ -232,7 +273,7 @@ async function runJudge0({ lang, source, stdin, runTimeoutMs, timeoutMs }) {
   const headers = { "Content-Type": "application/json" };
   if (RUNNER_API_KEY) headers["X-Api-Key"] = RUNNER_API_KEY;
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Math.max(runTimeoutMs + 5000, 20000));
+  const timer = setTimeout(() => controller.abort(), RUNNER_HARD_TIMEOUT_MS);
   let res;
   try {
     res = await fetch(endpoint, { method: "POST", headers, body: JSON.stringify(payload), signal: controller.signal });
@@ -271,8 +312,7 @@ async function runJudge0({ lang, source, stdin, runTimeoutMs, timeoutMs }) {
 
 // ------------------------------------------------------------------
 // Provider selection / fallback so one unavailable provider never
-// takes the app down (spec: execution failures are SERVICE errors,
-// never faked and never a Wrong Answer).
+// takes the API down (execution failures are SERVICE errors).
 // ------------------------------------------------------------------
 async function runCode(args) {
   const tried = [];
@@ -295,7 +335,8 @@ async function runCode(args) {
       if (out.error) { attempts.push({ provider: name, status: out.error.status, body: out.error.body }); continue; }
       return { result: out.result, tried };
     } catch (e) {
-      attempts.push({ provider: name, status: "exception", body: e instanceof Error ? e.message : String(e) });
+      const aborted = (e && e.name === "AbortError");
+      attempts.push({ provider: name, status: aborted ? "timeout" : "exception", body: aborted ? "execution service timed out" : (e instanceof Error ? e.message : String(e)) });
     }
   }
 
@@ -314,48 +355,76 @@ async function runCode(args) {
   };
 }
 
-serve(async (req) => {
-  if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+async function readBody(req) {
+  if (req.body && typeof req.body === "object" && !Buffer.isBuffer(req.body)) return req.body;
+  try {
+    const chunks = [];
+    for await (const c of req) chunks.push(c);
+    const raw = Buffer.concat(chunks).toString("utf8");
+    return raw ? JSON.parse(raw) : {};
+  } catch (e) {
+    return null;
+  }
+}
 
-  const url = new URL(req.url);
+function trimTrailing(headers) {
+  return headers || {};
+}
+
+module.exports = async function programmingRun(req, res) {
+  // OPTIONS preflight
+  if (req.method === "OPTIONS") {
+    cors(res);
+    res.statusCode = 204;
+    res.end();
+    return;
+  }
+
+  const url = new URL(req.url || "", "http://internal");
+
+  // Health check
   if (req.method === "GET" && url.pathname.endsWith("/health")) {
-    return json({
+    return json(res, {
       ok: true,
       service: "programming-run",
       providers: {
         piston: { enabled: !!PISTON_BASE_URL, url: PISTON_BASE_URL || null },
         judge0: { enabled: !!RUNNER_URL, url: RUNNER_URL, public: RUNNER_URL.indexOf("ce.judge0.com") !== -1 },
       },
+      languages: Object.keys(LANGS),
       auth_required: !SKIP_AUTH,
       max_cpu_seconds: RUNNER_MAX_CPU_SECONDS,
       memory_limit_kb: RUNNER_MEMORY_LIMIT_KB,
     });
   }
 
-  if (req.method !== "POST") return json({ message: "Method not allowed" }, 405);
+  if (req.method !== "POST") return json(res, { message: "Method not allowed" }, 405);
 
-  const auth = await verifyJwt(req.headers.get("authorization"));
+  const auth = await verifyJwt(trimTrailing(req.headers).authorization || req.headers.authorization);
   if (!auth.ok) {
     console.error("programming-run auth rejected:", auth.reason);
-    return json({ ok: false, error: { message: "Authentication required", code: "AUTH", detail: auth.reason } }, 401);
+    return json(res, { ok: false, error: { message: "Authentication required", code: "AUTH", detail: auth.reason } }, 401);
   }
 
   let body;
-  try { body = await req.json(); } catch (e) { return json({ ok: false, error: { message: "Invalid JSON body", code: "BAD_REQUEST" } }, 400); }
-  const { language, source, stdin, timeout_ms } = body || {};
+  try { body = await readBody(req); } catch (e) { body = null; }
+  if (!body || typeof body !== "object") {
+    return json(res, { ok: false, error: { message: "Invalid JSON body", code: "BAD_REQUEST" } }, 400);
+  }
+  const { language, source, stdin, timeout_ms } = body;
   const resolved = resolveLang(language);
   if (!resolved) {
-    return json({ ok: false, error: { message: "Unsupported language: " + String(language), code: "BAD_REQUEST", language: String(language) } }, 400);
+    return json(res, { ok: false, error: { message: "Unsupported language: " + String(language), code: "BAD_REQUEST", language: String(language) } }, 400);
   }
   if (typeof source !== "string" || !source.trim()) {
-    return json({ ok: false, error: { message: "source is required", code: "BAD_REQUEST", language: resolved.cfg.label } }, 400);
+    return json(res, { ok: false, error: { message: "source is required", code: "BAD_REQUEST", language: resolved.cfg.label } }, 400);
   }
   if (source.length > 65536) {
-    return json({ ok: false, error: { message: "Source code is too large", code: "BAD_REQUEST", language: resolved.cfg.label } }, 400);
+    return json(res, { ok: false, error: { message: "Source code is too large", code: "BAD_REQUEST", language: resolved.cfg.label } }, 400);
   }
   const safeStdin = String(stdin == null ? "" : stdin);
   if (safeStdin.length > 16384) {
-    return json({ ok: false, error: { message: "Program input is too large", code: "BAD_REQUEST", language: resolved.cfg.label } }, 400);
+    return json(res, { ok: false, error: { message: "Program input is too large", code: "BAD_REQUEST", language: resolved.cfg.label } }, 400);
   }
   const timeoutMs = Math.max(200, Math.min(Math.round(parseInt(timeout_ms, 10) || 4000), RUNNER_RUN_TIMEOUT_MS));
 
@@ -371,7 +440,7 @@ serve(async (req) => {
       timeout_ms: timeoutMs,
       user: auth.sub || null,
     }, null, 2));
-    return json({ ok: false, error: out.providerError }, 502);
+    return json(res, { ok: false, error: out.providerError }, 502);
   }
 
   console.log("programming-run ok", JSON.stringify({
@@ -385,5 +454,5 @@ serve(async (req) => {
     user: auth.sub || null,
     tried: out.tried,
   }));
-  return json({ ok: true, result: out.result }, 200);
-});
+  return json(res, { ok: true, result: out.result }, 200);
+};

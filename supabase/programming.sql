@@ -50,8 +50,13 @@ CREATE TABLE IF NOT EXISTS programming_problems (
 
 -- ============================================================
 -- 3) PROGRAMMING TEST CASES
---    is_sample  -> visible to students
---    is_hidden  -> used for grading ONLY (never shown)
+--    is_sample          -> visible to students
+--    is_hidden          -> used for grading ONLY (never shown)
+--    include_in_grading -> participates in the equal split of the
+--                          problem's points (the SUM of "included"
+--                          cases is the pool the score is divided
+--                          from; points are NEVER hard-coded, they
+--                          are computed at grade time)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS programming_test_cases (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
@@ -62,9 +67,14 @@ CREATE TABLE IF NOT EXISTS programming_test_cases (
   points INTEGER DEFAULT 0,
   is_sample BOOLEAN DEFAULT false,
   is_hidden BOOLEAN DEFAULT false,
+  include_in_grading BOOLEAN DEFAULT true,
   sort_order INTEGER DEFAULT 0,
   created_at TIMESTAMPTZ DEFAULT now()
 );
+
+-- Safe to re-run on existing databases that predate this column.
+ALTER TABLE programming_test_cases
+  ADD COLUMN IF NOT EXISTS include_in_grading BOOLEAN DEFAULT true;
 
 -- ============================================================
 -- 4) PROGRAMMING SUBMISSIONS (one row per problem check/save-run)
@@ -80,6 +90,7 @@ CREATE TABLE IF NOT EXISTS programming_submissions (
   status TEXT DEFAULT 'pending',        -- pending | accepted | wrong_answer
                                         -- | compilation_error | runtime_error
                                         -- | time_limit_exceeded
+                                        -- | memory_limit_exceeded
   score INTEGER DEFAULT 0,
   max_score INTEGER DEFAULT 0,
   sample_passed INTEGER DEFAULT 0,
@@ -90,6 +101,26 @@ CREATE TABLE IF NOT EXISTS programming_submissions (
   compile_output TEXT DEFAULT '',
   runtime_ms INTEGER DEFAULT 0,
   submitted_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- ============================================================
+-- 4b) PROGRAMMING TEST RESULTS (one row per test case per submission)
+--     Written by the grader alongside each submission. Hidden-case
+--     actual_output is intentionally left blank so hidden answers
+--     are never stored anywhere readable.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS programming_test_results (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  submission_id UUID NOT NULL REFERENCES programming_submissions(id) ON DELETE CASCADE,
+  test_case_id UUID NOT NULL REFERENCES programming_test_cases(id) ON DELETE CASCADE,
+  status TEXT DEFAULT 'failed',         -- passed | failed | compilation_error
+                                        -- | runtime_error | time_limit_exceeded
+                                        -- | memory_limit_exceeded
+                                        -- | execution_service_error
+  actual_output TEXT DEFAULT '',
+  execution_time INTEGER DEFAULT 0,
+  points_earned INTEGER DEFAULT 0,
+  created_at TIMESTAMPTZ DEFAULT now()
 );
 
 -- ============================================================
@@ -203,6 +234,8 @@ CREATE INDEX IF NOT EXISTS idx_ptc_problem ON programming_test_cases(problem_id)
 CREATE INDEX IF NOT EXISTS idx_ps_activity ON programming_submissions(activity_id);
 CREATE INDEX IF NOT EXISTS idx_ps_problem  ON programming_submissions(problem_id);
 CREATE INDEX IF NOT EXISTS idx_ps_student  ON programming_submissions(student_id);
+CREATE INDEX IF NOT EXISTS idx_ptr_submission ON programming_test_results(submission_id);
+CREATE INDEX IF NOT EXISTS idx_ptr_test_case   ON programming_test_results(test_case_id);
 CREATE INDEX IF NOT EXISTS idx_pr_activity ON programming_results(activity_id);
 CREATE INDEX IF NOT EXISTS idx_pr_student  ON programming_results(student_id);
 CREATE INDEX IF NOT EXISTS idx_pcs_problem ON programming_code_saves(problem_id);
@@ -223,6 +256,7 @@ ALTER TABLE programming_activities  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE programming_problems    ENABLE ROW LEVEL SECURITY;
 ALTER TABLE programming_test_cases  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE programming_submissions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE programming_test_results ENABLE ROW LEVEL SECURITY;
 ALTER TABLE programming_results     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE programming_code_saves  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE prog_games              ENABLE ROW LEVEL SECURITY;
@@ -234,6 +268,7 @@ DROP POLICY IF EXISTS "prog_activities_all"  ON programming_activities;
 DROP POLICY IF EXISTS "prog_problems_all"    ON programming_problems;
 DROP POLICY IF EXISTS "prog_tests_all"       ON programming_test_cases;
 DROP POLICY IF EXISTS "prog_submissions_all" ON programming_submissions;
+DROP POLICY IF EXISTS "prog_test_results_all" ON programming_test_results;
 DROP POLICY IF EXISTS "prog_results_all"     ON programming_results;
 DROP POLICY IF EXISTS "prog_saves_all"       ON programming_code_saves;
 DROP POLICY IF EXISTS "prog_games_all"       ON prog_games;
@@ -245,6 +280,7 @@ CREATE POLICY "prog_activities_all"  ON programming_activities  FOR ALL USING (a
 CREATE POLICY "prog_problems_all"    ON programming_problems    FOR ALL USING (auth.role() = 'authenticated');
 CREATE POLICY "prog_tests_all"       ON programming_test_cases  FOR ALL USING (auth.role() = 'authenticated');
 CREATE POLICY "prog_submissions_all" ON programming_submissions FOR ALL USING (auth.role() = 'authenticated');
+CREATE POLICY "prog_test_results_all" ON programming_test_results FOR ALL USING (auth.role() = 'authenticated');
 CREATE POLICY "prog_results_all"     ON programming_results     FOR ALL USING (auth.role() = 'authenticated');
 CREATE POLICY "prog_saves_all"       ON programming_code_saves  FOR ALL USING (auth.role() = 'authenticated');
 CREATE POLICY "prog_games_all"       ON prog_games              FOR ALL USING (auth.role() = 'authenticated');
@@ -257,7 +293,7 @@ CREATE POLICY "prog_cheatlogs_all"   ON prog_cheat_logs         FOR ALL USING (a
 -- ============================================================
 DO $$ DECLARE t TEXT; BEGIN
   FOREACH t IN ARRAY ARRAY['programming_activities','programming_problems','programming_test_cases',
-                            'programming_submissions','programming_results','programming_code_saves',
+                            'programming_submissions','programming_test_results','programming_results','programming_code_saves',
                             'prog_games','prog_game_players','prog_game_results','prog_cheat_logs'] LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_publication_tables
                    WHERE pubname = 'supabase_realtime' AND tablename = t) THEN

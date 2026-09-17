@@ -1,0 +1,18 @@
+{
+  "name": "wqtech-programming",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WQTech - quiz & programming learning system (static front-end + Vercel serverless runner API)",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "jose": "^5.9.6"
+  },
+  "devDependencies": {},
+  "scripts": {
+    "check": "node --check js/programming-shared.js && node --check js/piston-config.js && node --check api/programming-run.js",
+    "test:api": "node test/api-programming-run.test.js",
+    "test:grading": "node test/grading-pipeline.test.js"
+  }
+}
