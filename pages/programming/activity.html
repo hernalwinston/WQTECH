@@ -764,12 +764,17 @@
       return failed;
     }
     function showRunError(prefix, e) {
-      if (e && e.kind === 'execution') {
-        appendConsole(prefix + 'Unable to start the code runner. Please check the execution service configuration.', 'err');
-        if (e.status) appendConsole('Execution service returned HTTP ' + e.status + '.', 'muted');
-        console.error('Execution service detail:', e.detail || e.message || '');
-      } else {
-        appendConsole(prefix + ((e && e.message) || 'unknown error'), 'err');
+      const meta = (e && e.meta) || {};
+      appendConsole(prefix + (((e && e.message) || 'unknown error')), 'err');
+      if (e && (e.kind === 'execution' || e.kind === 'configuration')) {
+        appendConsole('— Code Runner Error —', 'muted');
+        appendConsole('The execution service rejected the request:', 'muted');
+        if (e.status) appendConsole('Status: ' + e.status, 'muted');
+        if (meta.provider) appendConsole('Provider: ' + meta.provider, 'muted');
+        if (meta.language) appendConsole('Language: ' + meta.language, 'muted');
+        if (meta.version) appendConsole('Version: ' + meta.version, 'muted');
+        appendConsole('Check the browser/Supabase console for the complete request and response.', 'muted');
+        console.error('Code Runner Error:', { message: (e && e.message) || '', detail: (e && e.detail) || '', meta });
       }
     }
     const RUN_HTML = '<svg class="pa-run-ico" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>';

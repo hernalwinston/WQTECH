@@ -89,7 +89,23 @@ serve(async (req) => {
     clearTimeout(timer);
     if (!res.ok) {
       const txt = await res.text().catch(() => "");
-      console.error("programming-run upstream HTTP " + res.status + ": " + txt.slice(0, 500));
+      console.error("programming-run upstream failure", JSON.stringify({
+        provider: "judge0",
+        language,
+        language_id: langId,
+        source_length: source.length,
+        stdin: stdin || "",
+        request: {
+          source_code: source,
+          language_id: langId,
+          stdin: stdin || "",
+          cpu_time_limit: t,
+          memory_limit: RUNNER_MEMORY_LIMIT_KB,
+        },
+        api_url: RUNNER + "?base64_encoded=false&wait=true",
+        http_status: res.status,
+        response_body: txt.slice(0, 2000),
+      }));
       return json({
         message: "Execution service error (HTTP " + res.status + ")",
         status: res.status,
@@ -100,6 +116,7 @@ serve(async (req) => {
     return json(run, 200);
   } catch (e) {
     clearTimeout(timer);
+    console.error("programming-run upstream exception", e instanceof Error ? e.message : String(e));
     return json({ message: "Runner unavailable: " + (e instanceof Error ? e.message : String(e)) }, 502);
   }
 });

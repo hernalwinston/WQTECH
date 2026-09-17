@@ -227,6 +227,17 @@ window.Programming = (function () {
     return 54;
   }
 
+  // Friendly language name for diagnostics / the Code Runner Error panel.
+  function displayLang(language) {
+    const l = String(language || '').toLowerCase();
+    if (l === 'c') return 'C';
+    if (l === 'c++' || l === 'cpp' || l === 'cplusplus') return 'C++';
+    if (l === 'c#' || l === 'csharp' || l === 'cs') return 'C#';
+    if (l === 'java') return 'Java';
+    if (l === 'python' || l === 'python3' || l === 'py') return 'Python';
+    return String(language || '');
+  }
+
   // Accepts EITHER the Edge Function response, the raw Piston shape, OR the
   // raw Judge0 shape, and normalizes everything to the single shape the rest
   // of the app expects: { stdout, stderr, compile_error, compile_output,
@@ -292,34 +303,80 @@ window.Programming = (function () {
     } catch (e) { return ''; }
   }
 
-  function executionError(status, detail) {
+  // Rich execution-service error. `meta` carries the exact request we sent
+  // and the exact upstream response, so the cause of any HTTP 4xx/5xx can be
+  // identified from the console instead of just seeing "HTTP 400".
+  function executionError(status, detail, meta) {
     const err = new Error('Execution service error (HTTP ' + status + ')');
     err.kind = 'execution';
     err.status = status;
     err.detail = detail || '';
+    err.meta = meta || {};
     return err;
   }
 
+  // Never send undefined/null/empty for required fields.
+  function requireRunnerFields(payload, names, provider) {
+    for (const n of names) {
+      const v = payload[n];
+      if (v === undefined || v === null || v === '') {
+        const err = new Error(provider + ' missing or invalid required field: ' + n);
+        err.kind = 'configuration';
+        err.status = null;
+        err.meta = { provider, field: n, payload: JSON.stringify(payload) };
+        console.error('Runner config error:', err.message, '\npayload:', JSON.stringify(payload));
+        throw err;
+      }
+    }
+  }
+
+  // Full failure trace for the browser/Supabase console (spec requirement 1):
+  // provider, language, version, source length, stdin, request payload (no
+  // secrets), API URL, HTTP status and the real response body from the exec
+  // service — so a 400 is never reported without its cause.
+  function logRunnerFailure(provider, diag) {
+    try {
+      console.error('[Runner ' + provider + '] failure diagnostics',
+        JSON.stringify({
+          provider,
+          language: diag.language,
+          language_version: diag.version || null,
+          source_length: diag.sourceLength,
+          stdin: diag.stdin,
+          request: diag.requestBody,
+          api_url: diag.url,
+          http_status: diag.status,
+          response_body: diag.responseBody
+        }, null, 2));
+    } catch (e) {}
+  }
+
   async function runInPiston({ language, source, stdin, timeoutMs }) {
+    const provider = 'piston';
     const t = Math.min(Math.max(parseInt(timeoutMs, 10) || 4000, 200), 20000);
     const plang = pistonLang(language);
-    const res = await fetch(PISTON_BASE + '/execute', {
+    const version = await pistonVersion(plang);
+    const requestBody = {
+      language: plang,
+      version,
+      files: [{ name: pistonFileName(plang), content: source }],
+      stdin: stdin || '',
+      args: [],
+      compile_timeout: 10000,
+      run_timeout: t
+    };
+    requireRunnerFields(requestBody, ['language', 'version', 'files'], provider);
+    const url = PISTON_BASE + '/execute';
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        language: plang,
-        version: await pistonVersion(plang),
-        files: [{ name: pistonFileName(plang), content: source }],
-        stdin: stdin || '',
-        args: [],
-        compile_timeout: 10000,
-        run_timeout: t
-      })
+      body: JSON.stringify(requestBody)
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       const detail = (body && body.message) || (body && body.error) || (body && body.detail) || '';
-      throw executionError(res.status, detail);
+      logRunnerFailure(provider, { language: plang, version, sourceLength: source.length, stdin: stdin || '', requestBody, url, status: res.status, responseBody: JSON.stringify(body).slice(0, 2000) });
+      throw executionError(res.status, detail, { provider, language: displayLang(language), version, url, payload: requestBody, response: JSON.stringify(body).slice(0, 2000) });
     }
     return normalizeRun(await res.json());
   }
@@ -328,20 +385,18 @@ window.Programming = (function () {
     const t = parseInt(timeoutMs, 10) || 4000;
     if (!source) throw new Error('No code to run.');
 
-    // 1) PRIMARY (when configured): a self-hosted Piston instance.
-    //    No cpu/memory limit params, so the out-of-range HTTP 400 cannot
-    //    happen. If it is unreachable or rejects us, log it and fall
-    //    through to the Edge Function / Judge0 path so a hiccup never
-    //    blocks anyone.
+    // 1) PRIMARY (when configured): self-hosted Piston instance. Piston
+    //    takes NO cpu/memory limit params, so an out-of-range limit 400
+    //    cannot happen. Unreachable/rejected => log + fall through.
     if (PISTON_BASE) {
       try {
         return await runInPiston({ language, source, stdin, timeoutMs: t });
       } catch (e) {
-        if (e && e.kind === 'execution') console.error('piston runner -> HTTP ' + e.status + ': ' + (e.detail || e.message));
+        if (e && (e.kind === 'execution' || e.kind === 'configuration')) console.error('piston runner -> ' + (e.message || 'failed'));
       }
     }
 
-    // 2) Fallback: your own Supabase Edge Function (server -> judge).
+    // 2) Fallback: your own Supabase Edge Function (server -> judge0).
     if (FUNCTIONS_BASE) {
       try {
         const controller = new AbortController();
@@ -355,30 +410,36 @@ window.Programming = (function () {
         });
         clearTimeout(to);
         if (res.ok) return normalizeRun(await res.json());
-        // Edge Function is reachable but failed. Log it (Supabase function
-        // logs / browser console) then still fall back to the public sandbox
-        // so a temporary upstream hiccup never blocks participants.
         const tErr = await res.text().catch(() => '');
+        logRunnerFailure('edge-function', { language: displayLang(language), version: null, sourceLength: source.length, stdin: stdin || '', requestBody: { language, source, stdin: stdin || '', timeout_ms: t }, url: FUNCTIONS_BASE, status: res.status, responseBody: tErr.slice(0, 2000) });
         console.error('programming-run edge function -> HTTP ' + res.status + ': ' + tErr.slice(0, 300));
       } catch (e) { /* unreachable / not deployed / CORS -> fall through to Judge0 */ }
     }
 
-    // 3) Fallback: Judge0 CE directly from the browser.
-    const res = await fetch(JUDGE0_PUBLIC + '?base64_encoded=false&wait=true', {
+    // 3) Fallback: Judge0 CE directly from the browser. Limits are clamped
+    //    to values every CE instance accepts, which is what prevents the
+    //    out-of-range cpu/memory HTTP 400 in the first place.
+    const provider = 'judge0';
+    const langId = judge0LangId(language);
+    const requestBody = {
+      source_code: source,
+      language_id: langId,
+      stdin: stdin || '',
+      cpu_time_limit: Math.min(Math.max(Math.ceil(t / 1000), 1), RUNNER_MAX_CPU_SECONDS),
+      memory_limit: RUNNER_MEMORY_LIMIT_KB
+    };
+    requireRunnerFields(requestBody, ['source_code', 'language_id'], provider);
+    const url = JUDGE0_PUBLIC + '?base64_encoded=false&wait=true';
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        source_code: source,
-        language_id: judge0LangId(language),
-        stdin: stdin || '',
-        cpu_time_limit: Math.min(Math.max(Math.ceil(t / 1000), 1), RUNNER_MAX_CPU_SECONDS),
-        memory_limit: RUNNER_MEMORY_LIMIT_KB
-      })
+      body: JSON.stringify(requestBody)
     });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       const detail = (body && body.message) || (body && body.error) || (body && body.detail) || '';
-      throw executionError(res.status, detail);
+      logRunnerFailure(provider, { language: displayLang(language), version: null, sourceLength: source.length, stdin: stdin || '', requestBody, url, status: res.status, responseBody: JSON.stringify(body).slice(0, 2000) });
+      throw executionError(res.status, detail, { provider, language: displayLang(language), version: null, url, payload: requestBody, response: JSON.stringify(body).slice(0, 2000) });
     }
     return normalizeRun(await res.json());
   }
