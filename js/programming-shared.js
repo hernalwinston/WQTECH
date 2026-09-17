@@ -157,6 +157,44 @@ window.Programming = (function () {
   const FUNCTIONS_BASE = (window.RUNNER_API_URL && String(window.RUNNER_API_URL))
     || '';
 
+  // ------------------------------------------------------------------
+  // RUNNER HEALTH CHECK — runs once on page load to verify the Vercel
+  // function is deployed and reachable. If it fails, all Run/Check
+  // calls will fail, so we surface the error early instead of hiding it.
+  // ------------------------------------------------------------------
+  let _runnerHealth = null;
+  async function checkRunnerHealth() {
+    if (_runnerHealth) return _runnerHealth;
+    if (!FUNCTIONS_BASE) {
+      _runnerHealth = { ok: false, message: 'Runner API URL not configured (window.RUNNER_API_URL is empty). Deploy api/programming-run.js to Vercel.', url: '' };
+      console.error('[Runner] health check failed:', _runnerHealth.message);
+      return _runnerHealth;
+    }
+    try {
+      const r = await fetch(FUNCTIONS_BASE + '/health', { method: 'GET', signal: AbortSignal.timeout(10000) });
+      const body = await r.json().catch(() => null);
+      if (r.ok && body && body.ok) {
+        _runnerHealth = { ok: true, url: FUNCTIONS_BASE, languages: body.languages, active_provider: body.active_provider };
+        console.log('[Runner] health check passed', JSON.stringify(_runnerHealth));
+      } else {
+        const hint = r.status === 405
+          ? 'HTTP 405 means the Vercel function is NOT deployed. The static file server is handling POST requests instead of the serverless function. Deploy this project to Vercel: push to GitHub → import in Vercel → set environment variables.'
+          : r.status === 404
+          ? 'HTTP 404 means the Vercel function file api/programming-run.js was not found. Check that the file exists in the api/ directory and that the Vercel project root contains it.'
+          : 'Unexpected response from runner health check.';
+        _runnerHealth = { ok: false, status: r.status, message: hint, url: FUNCTIONS_BASE, body: body };
+        console.error('[Runner] health check failed:', r.status, hint, body);
+      }
+    } catch (e) {
+      const msg = (e && e.name === 'TimeoutError')
+        ? 'Runner API health check timed out. The Vercel function may not be deployed.'
+        : 'Runner API unreachable: ' + (e && e.message || e);
+      _runnerHealth = { ok: false, message: msg, url: FUNCTIONS_BASE };
+      console.error('[Runner] health check failed:', msg);
+    }
+    return _runnerHealth;
+  }
+
   // Friendly language name for diagnostics / the Code Runner Error panel.
   function displayLang(language) {
     const l = String(language || '').toLowerCase();
@@ -280,8 +318,18 @@ window.Programming = (function () {
   async function runInSandbox({ language, source, stdin, timeoutMs }) {
     if (!source) throw new Error('No code to run.');
     if (!FUNCTIONS_BASE) {
-      const err = executionError(0, 'The code runner backend is not configured for this site.', { provider: 'backend' });
+      const err = executionError(0, 'The code runner backend is not configured for this site. window.RUNNER_API_URL is empty. Deploy api/programming-run.js to Vercel.', { provider: 'backend' });
       throw err;
+    }
+    // Verify runner is deployed before trying a full execution.
+    const health = await checkRunnerHealth();
+    if (health && !health.ok) {
+      throw executionError(health.status || 405, health.message || 'Runner API is not deployed.', {
+        provider: 'backend',
+        language: displayLang(language),
+        url: FUNCTIONS_BASE,
+        hint: 'Open ' + FUNCTIONS_BASE + '/health in your browser to verify the function is deployed.'
+      });
     }
     const t = parseInt(timeoutMs, 10) || 4000;
     const controller = new AbortController();
@@ -310,8 +358,12 @@ window.Programming = (function () {
     // student's Wrong Answer / Compilation Error.
     const err = (body && body.error) || {};
     const detail = err.detail || err.message || '';
+    const http405hint = (res.status === 405)
+      ? ' HTTP 405 = the Vercel serverless function is NOT deployed; the static host is answering POST with Method Not Allowed. Deploy this project on Vercel (git push → import → set env vars), then verify '
+        + FUNCTIONS_BASE + '/health. If you are testing locally, open the Vercel deployment URL instead of the local file/server.'
+      : '';
     logRunnerFailure(err.provider || 'function', { language: displayLang(language), version: err.version || null, sourceLength: source.length, stdin: stdin || '', requestBody: { language, source, stdin: stdin || '', timeout_ms: t }, url: FUNCTIONS_BASE, status: res.status, responseBody: JSON.stringify(body || '').slice(0, 2000) });
-    throw executionError(res.status, detail, {
+    throw executionError(res.status, (detail || String(res.status)) + http405hint, {
       provider: err.provider || 'backend',
       language: displayLang(language),
       version: err.version || null,
@@ -529,6 +581,7 @@ window.Programming = (function () {
     saveCode, loadSavedCode,
     runInSandbox, checkCode, finalizeActivity,
     startTimer,
+    checkRunnerHealth,
     normalizeOutput, allocatePoints
   };
 })();

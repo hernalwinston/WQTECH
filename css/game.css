@@ -1,0 +1,142 @@
+/* ============================================================
+   game.html - page styles (extracted from inline <style>)
+   ============================================================ */
+
+    .auth-gate body { visibility: hidden; }
+  
+
+    .game-page {
+      min-height: 100vh;
+      background: var(--bg);
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 20px;
+    }
+    .game-page.timer-active { justify-content: flex-start; padding-top: 30px; }
+
+    .game-state { display: none; text-align: center; width: 100%; max-width: 680px; }
+    .game-state.active { display: block; animation: fadeIn 0.4s ease; }
+
+    .waiting-screen h2 { font-size: 1.8rem; margin-bottom: 12px; color: var(--accent); }
+    .waiting-screen p { color: var(--text-secondary); font-size: 1.05rem; }
+
+    .end-screen h1 { font-size: 2rem; margin-bottom: 16px; }
+
+    /* ---- FULLSCREEN SECURITY GATE ---- */
+    .fs-gate {
+      position: fixed; inset: 0;
+      background: var(--bg);
+      z-index: 8000;
+      display: none; align-items: center; justify-content: center;
+      padding: 20px;
+    }
+    .fs-gate.active { display: flex; animation: fadeIn 0.3s ease; }
+    .fs-gate-card {
+      max-width: 470px; width: 100%;
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-xl);
+      padding: 42px 34px;
+      text-align: center;
+      box-shadow: var(--shadow-lg), var(--shadow-glow);
+    }
+    .fs-gate-card h2 { font-size: 1.55rem; margin-bottom: 12px; color: var(--text); font-weight: 800; }
+    .fs-gate-card p { color: var(--text-secondary); font-size: 0.95rem; margin-bottom: 22px; line-height: 1.6; }
+    .fs-lock-note { font-size: 0.78rem !important; color: var(--text-muted) !important; margin-top: 16px !important; margin-bottom: 0 !important; }
+    .secure-pill {
+      display: inline-block;
+      background: var(--success-bg); color: var(--success);
+      border: 1px solid rgba(22,163,74,0.25);
+      font-size: 0.75rem; font-weight: 800;
+      padding: 5px 16px; border-radius: 999px;
+      margin-bottom: 16px;
+      letter-spacing: 0.8px; text-transform: uppercase;
+    }
+
+    /* ---- ANSWERED CHIP + LOCKED TIMER ---- */
+    .answered-chip {
+      display: none;
+      width: max-content; max-width: 100%;
+      margin: 14px auto 0;
+      background: var(--accent-light); color: var(--accent);
+      border: 1px solid rgba(99,102,241,0.35);
+      padding: 8px 20px;
+      border-radius: 999px;
+      font-size: 0.88rem; font-weight: 700;
+      letter-spacing: 0.3px;
+      animation: popIn 0.25s ease;
+    }
+    .answered-chip.timeout-chip { background: var(--warning-bg); color: var(--warning); border-color: rgba(217,119,6,0.35); }
+
+    .timer-locked {
+      background: var(--accent) !important;
+      box-shadow: 0 0 24px rgba(99,102,241,0.35) !important;
+      animation: none !important;
+    }
+
+    /* ---- INSTANT ANSWER FLASH (+100 / 0) ---- */
+    .score-popup.correct { color: #22C55E; text-shadow: 0 4px 28px rgba(34,197,94,0.5); }
+    .score-popup.wrong { color: #EF4444; text-shadow: 0 4px 28px rgba(239,68,68,0.45); }
+
+    /* ---- SECURE MODE (blocks selection while quiz is live) ---- */
+    body.quiz-secure { user-select: none; -webkit-user-select: none; }
+    body.quiz-secure input { user-select: text; -webkit-user-select: text; }
+
+    .secure-hint {
+      display: inline-block;
+      color: var(--text-muted); font-size: 0.82rem; font-weight: 600;
+      margin-top: 14px;
+    }
+
+    /* ---- GROUP FINDER (lobby) ---- */
+    .group-panel {
+      margin-top: 24px;
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius-xl);
+      padding: 22px;
+      text-align: left;
+      box-shadow: var(--shadow);
+    }
+    .group-panel h4 {
+      font-size: 1.05rem; font-weight: 800; margin-bottom: 4px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .group-panel h4 .group-size-pill {
+      font-size: 0.75rem; font-weight: 700; color: var(--accent);
+      background: var(--accent-light); padding: 4px 12px; border-radius: 999px;
+    }
+    .group-panel .gp-sub { color: var(--text-secondary); font-size: 0.85rem; margin-bottom: 14px; }
+    .group-members {
+      display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px;
+    }
+    .group-member-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: var(--bg-secondary); border: 1px solid var(--card-border);
+      padding: 6px 12px; border-radius: 999px; font-size: 0.85rem; font-weight: 600;
+    }
+    .group-member-chip.leader { border-color: rgba(99,102,241,0.5); color: var(--accent); }
+    .group-full-note {
+      background: var(--success-bg); color: var(--success);
+      border: 1px solid rgba(22,163,74,0.25);
+      padding: 8px 14px; border-radius: var(--radius); font-size: 0.85rem; font-weight: 700;
+      text-align: center; margin-bottom: 16px;
+    }
+    .group-invites { margin-bottom: 16px; }
+    .group-invites .gi-title { font-size: 0.8rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); margin-bottom: 8px; }
+    .group-invite-card {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+      background: var(--accent-light); border: 1px solid rgba(99,102,241,0.35);
+      border-radius: var(--radius); padding: 10px 14px; margin-bottom: 8px;
+    }
+    .group-invite-card .gi-actions { display: flex; gap: 8px; }
+    .group-players { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+    .group-player-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      background: var(--bg-secondary); border: 1px solid var(--card-border);
+      border-radius: var(--radius); padding: 8px 12px;
+    }
+    .group-player-name { font-weight: 600; font-size: 0.9rem; }
+    .group-player-row.in-my-group { opacity: 0.55; }
+    .group-actions { margin-top: 14px; display: flex; gap: 10px; justify-content: center; }
+  

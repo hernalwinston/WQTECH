@@ -320,28 +320,41 @@ async function runCode(args) {
   const wanted = PROVIDER === "piston" ? ["piston"] : PROVIDER === "judge0" ? ["judge0"] : ["piston", "judge0"];
 
   for (const name of wanted) {
-    if (name === "piston" && !PISTON_BASE_URL) continue;
-    if (name === "judge0" && !RUNNER_URL) continue;
+    if (name === "piston" && !PISTON_BASE_URL) {
+      console.log("programming-run skip piston: PISTON_BASE_URL not set");
+      continue;
+    }
+    if (name === "judge0" && !RUNNER_URL) {
+      console.log("programming-run skip judge0: RUNNER_URL not set");
+      continue;
+    }
     tried.push(name);
+    const providerStart = Date.now();
     try {
       if (name === "piston") {
         const pistonLang = LANGS[args.lang].piston;
         const version = await pistonVersion(pistonLang, LANGS[args.lang].version);
+        console.log("programming-run calling piston", JSON.stringify({ url: PISTON_BASE_URL + "/execute", lang: args.lang, pistonLang, version, stdin_len: (args.stdin || "").length }));
         const out = await runPiston({ lang: args.lang, source: args.source, stdin: args.stdin, runTimeoutMs: args.timeoutMs, version });
+        console.log("programming-run piston result", JSON.stringify({ provider: name, ms: Date.now() - providerStart, ok: !out.error, error_status: out.error ? out.error.status : null }));
         if (out.error) { attempts.push({ provider: name, status: out.error.status, body: out.error.body }); continue; }
         return { result: out.result, tried };
       }
+      console.log("programming-run calling judge0", JSON.stringify({ url: RUNNER_URL, lang: args.lang, judge0_id: LANGS[args.lang].judge0, stdin_len: (args.stdin || "").length }));
       const out = await runJudge0({ lang: args.lang, source: args.source, stdin: args.stdin, runTimeoutMs: args.timeoutMs, timeoutMs: args.timeoutMs });
+      console.log("programming-run judge0 result", JSON.stringify({ provider: name, ms: Date.now() - providerStart, ok: !out.error, error_status: out.error ? out.error.status : null }));
       if (out.error) { attempts.push({ provider: name, status: out.error.status, body: out.error.body }); continue; }
       return { result: out.result, tried };
     } catch (e) {
       const aborted = (e && e.name === "AbortError");
+      console.error("programming-run provider exception", JSON.stringify({ provider: name, ms: Date.now() - providerStart, error: e instanceof Error ? e.message : String(e) }));
       attempts.push({ provider: name, status: aborted ? "timeout" : "exception", body: aborted ? "execution service timed out" : (e instanceof Error ? e.message : String(e)) });
     }
   }
 
   const last = attempts[attempts.length - 1] || { provider: (tried[0] || "none"), status: 0, body: "" };
   const statusText = (typeof last.status === "number" && last.status) ? "HTTP " + last.status : String(last.status || "unreachable");
+  console.error("programming-run all providers failed", JSON.stringify({ tried, attempts, last_status: last.status }));
   return {
     providerError: {
       message: "Execution service error (" + statusText + ")",
@@ -382,25 +395,85 @@ module.exports = async function programmingRun(req, res) {
 
   const url = new URL(req.url || "", "http://internal");
 
-  // Health check
-  if (req.method === "GET" && url.pathname.endsWith("/health")) {
-    return json(res, {
+  // Health check (GET /health or GET / with ?ping=1)
+  // Returns deployment status, provider config, and optionally probes the provider.
+  if (req.method === "GET" && (url.pathname.endsWith("/health") || url.searchParams.get("ping") === "1")) {
+    const probe = url.searchParams.get("ping") === "1";
+    const diag = {
       ok: true,
       service: "programming-run",
+      version: "2.0",
+      node: process.version,
+      time: new Date().toISOString(),
+      env: {
+        SUPABASE_URL: SUPABASE_URL ? SUPABASE_URL.replace(/\/+$/, "") + "/..." : "(not set)",
+        RUNNER_PROVIDER: PROVIDER,
+        PISTON_BASE_URL: PISTON_BASE_URL || "(not set)",
+        JUDGE0_URL: RUNNER_URL,
+        JUDGE0_PUBLIC: RUNNER_URL.indexOf("ce.judge0.com") !== -1,
+        JUDGE0_API_KEY: RUNNER_API_KEY ? "(set)" : "(not set)",
+        SKIP_AUTH: SKIP_AUTH,
+        MAX_CPU_SECONDS: RUNNER_MAX_CPU_SECONDS,
+        MEMORY_LIMIT_KB: RUNNER_MEMORY_LIMIT_KB,
+      },
       providers: {
         piston: { enabled: !!PISTON_BASE_URL, url: PISTON_BASE_URL || null },
         judge0: { enabled: !!RUNNER_URL, url: RUNNER_URL, public: RUNNER_URL.indexOf("ce.judge0.com") !== -1 },
       },
       languages: Object.keys(LANGS),
-      auth_required: !SKIP_AUTH,
-      max_cpu_seconds: RUNNER_MAX_CPU_SECONDS,
-      memory_limit_kb: RUNNER_MEMORY_LIMIT_KB,
-    });
+      active_provider: PROVIDER === "piston" ? "piston" : PROVIDER === "judge0" ? "judge0" : (PISTON_BASE_URL ? "piston (primary) + judge0 (fallback)" : "judge0 (only)"),
+    };
+    if (probe) {
+      // Live probe: send a trivial request to the active provider.
+      const probeStart = Date.now();
+      try {
+        const testSource = 'int main(){return 0;}';
+        const testLang = "cpp";
+        if (PISTON_BASE_URL) {
+          const r = await fetch(PISTON_BASE_URL + "/execute", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ language: "c++", version: LANGS.cpp.version, files: [{ name: "main.cpp", content: testSource }], stdin: "", args: [], compile_timeout: 5000, run_timeout: 5000 }),
+            signal: AbortSignal.timeout(10000),
+          });
+          diag.probe = { provider: "piston", status: r.status, ok: r.ok, ms: Date.now() - probeStart };
+        } else {
+          const endpoint = RUNNER_URL + "?base64_encoded=false&wait=true";
+          const headers = { "Content-Type": "application/json" };
+          if (RUNNER_API_KEY) headers["X-Api-Key"] = RUNNER_API_KEY;
+          const r = await fetch(endpoint, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ source_code: testSource, language_id: LANGS.cpp.judge0, stdin: "", cpu_time_limit: 1, memory_limit: 128000, wall_time_limit: 5 }),
+            signal: AbortSignal.timeout(10000),
+          });
+          diag.probe = { provider: "judge0", status: r.status, ok: r.ok, ms: Date.now() - probeStart };
+        }
+        diag.ok = diag.probe.ok;
+      } catch (e) {
+        diag.probe = { provider: PISTON_BASE_URL ? "piston" : "judge0", error: e instanceof Error ? e.message : String(e), ms: Date.now() - probeStart };
+        diag.ok = false;
+      }
+    }
+    return json(res, diag, diag.ok ? 200 : 502);
   }
 
-  if (req.method !== "POST") return json(res, { message: "Method not allowed" }, 405);
+  if (req.method !== "POST") {
+    console.error("programming-run rejected non-POST request", JSON.stringify({ method: req.method, url: req.url }));
+    return json(res, { message: "Method not allowed. This endpoint requires POST.", received_method: req.method, hint: "The browser must send POST to /api/programming-run. If you see this error, the request is not reaching the Vercel serverless function." }, 405);
+  }
 
   const auth = await verifyJwt(trimTrailing(req.headers).authorization || req.headers.authorization);
+  console.log("programming-run incoming request", JSON.stringify({
+    method: req.method,
+    url: req.url,
+    content_type: (req.headers || {})["content-type"] || "(not set)",
+    auth_ok: auth.ok,
+    auth_reason: auth.ok ? undefined : auth.reason,
+    user: auth.sub || null,
+    origin: (req.headers || {})["origin"] || "(not set)",
+    user_agent: ((req.headers || {})["user-agent"] || "").slice(0, 100),
+  }));
   if (!auth.ok) {
     console.error("programming-run auth rejected:", auth.reason);
     return json(res, { ok: false, error: { message: "Authentication required", code: "AUTH", detail: auth.reason } }, 401);

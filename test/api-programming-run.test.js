@@ -66,6 +66,18 @@ function check(name, cond, extra) {
   const hb = JSON.parse(h._body);
   check('health ok', h.statusCode === 200 && hb.ok === true, 'services=' + JSON.stringify(hb.providers));
   check('health lists all 10 languages', (hb.languages || []).length === 10, hb.languages && hb.languages.join(','));
+  check('health exposes env summary (no secrets)', typeof hb.env === 'object' && hb.env.SUPABASE_URL === '(not set)' && hb.env.JUDGE0_API_KEY === '(not set)', JSON.stringify(hb.env));
+
+  // ---- GET /health?ping=1 probes the provider ----
+  stubFetch(async () => jsonRes({ stdout: '', status: { id: 3, description: 'Accepted' } }, 200));
+  const hp = await call(m0, { method: 'GET', url: '/api/programming-run/health?ping=1' });
+  const hpb = JSON.parse(hp._body);
+  check('health ping probes provider', hpb.probe && hpb.probe.provider === 'judge0' && hpb.probe.ok === true && hpb.ok === true, JSON.stringify(hpb.probe));
+
+  // ---- Non-POST request -> 405 with actionable message ----
+  const n405 = await call(m0, { method: 'PUT', url: '/api/programming-run' });
+  const n405b = JSON.parse(n405._body);
+  check('non-POST returns 405 with cause hint', n405.statusCode === 405 && n405b.message.indexOf('requires POST') !== -1 && n405b.received_method === 'PUT', JSON.stringify(n405b));
 
   // ---- Auth required without JWT (no SUPABASE_URL configured) ----
   const m1 = loadApi({ RUNNER_SKIP_AUTH: '0' });

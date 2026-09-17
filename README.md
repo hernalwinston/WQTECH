@@ -74,7 +74,19 @@ Configure providers in **Vercel → Project → Settings → Environment Variabl
 - `JUDGE0_API_KEY` — Judge0 CE admin key (kept server-side only)
 - `RUNNER_SKIP_AUTH` — leave unset in production (only `1` to allow unauthenticated calls during testing)
 
-Sanity check after deploy: open `<your-vercel-url>/api/programming-run/health`.
+Sanity check after deploy: open `<your-vercel-url>/api/programming-run/health`. This returns deployment info (providers, env summary, languages). Use `/api/programming-run/health?ping=1` to run a live probe of the execution provider. Reply `502` means the provider is unreachable; `200` means the whole chain works.
+
+### If Run/Check shows "Execution Service Error (HTTP 405)"
+
+HTTP 405 = **Method Not Allowed** — the browser sent `POST`, but whatever answered the request only allows `GET`. This almost always means **`api/programming-run.js` is NOT deployed as a Vercel serverless function** (you are viewing the site from a static host / local server, or the repo was not imported into Vercel). The static host is answering the `POST` instead of the function.
+
+Check, in order:
+
+1. **Are you on the Vercel URL?** Open `<your-vercel-url>/api/programming-run/health` in a browser. If it shows JSON `{ok:true, service: "programming-run", ...}` the function IS deployed — the 405 must be coming from the provider (see step 4). If it shows a Vercel 404/405 page, the function is not deployed → go to step 2.
+2. **Deploy the function.** Push this repo to GitHub and import it in Vercel (Settings → Git), or run `vercel --prod` from the project root. The `api/programming-run.js` file (with `api/` in the project root) becomes the `/api/programming-run` function automatically.
+3. **Set the env vars** in Vercel → Project → Settings → Environment Variables (see list above). At minimum set `SUPABASE_URL`.
+4. **Provider URL wrong?** If `/health?ping=1` returns `502` with a provider status (e.g. `405`), then your `PISTON_BASE_URL` or `JUDGE0_URL` points at an endpoint that rejects `POST`. For self-hosted Piston, the URL must end in `/api/v2` (the function calls `.../execute`) — a bare container URL like `https://piston.example.com` (or Pointing at the root `/`) makes it call the wrong path and get a 405. Fix the env var.
+5. **Check the Vercel function logs**: Vercel → Project → Functions → `programming-run` → Logs. The function now logs the incoming method, the provider URL called, and the provider's HTTP status on every run and every 405.
 
 Optionally run `supabase/seed-programming.sql` in the Supabase SQL Editor to create the "C++ Basic Programming" demo activity (Sum of N Integers, 20 pts, 4 samples + 2 hidden cases). Seed data is idempotent. No Supabase Edge Functions or CLI are required.
 

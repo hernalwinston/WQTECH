@@ -45,6 +45,9 @@ global.supabaseClient = {
 };
 
 async function defaultFetch(url, opts) {
+  if (String(url).includes('/api/programming-run/health')) {
+    return { ok: true, json: async () => ({ ok: true, service: 'programming-run', languages: ['cpp', 'go'], active_provider: 'judge0' }) };
+  }
   if (String(url).includes('/api/programming-run')) {
     const body = JSON.parse(opts.body);
     const stdin = String(body.stdin || '');

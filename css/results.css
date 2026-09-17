@@ -1,0 +1,11 @@
+/* ============================================================
+   results.html - page styles (extracted from inline <style>)
+   ============================================================ */
+
+    .auth-gate body { visibility: hidden; }
+    .prog-code-details { margin-top: 8px; }
+    .prog-code-details summary { cursor: pointer; font-size: 0.78rem; font-weight: 700; color: var(--accent); }
+    .prog-code-pre { background: var(--bg-secondary); border: 1px solid var(--card-border); border-radius: 8px;
+      padding: 10px 12px; margin: 6px 0 0; font-family: 'SFMono-Regular', Consolas, 'Cascadia Mono', monospace;
+      font-size: 0.75rem; line-height: 1.5; white-space: pre-wrap; word-break: break-word; color: var(--text-secondary); }
+  
