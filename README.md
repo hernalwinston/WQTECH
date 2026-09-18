@@ -88,7 +88,37 @@ Check, in order:
 4. **Provider URL wrong?** If `/health?ping=1` returns `502` with a provider status (e.g. `405`), then your `PISTON_BASE_URL` or `JUDGE0_URL` points at an endpoint that rejects `POST`. For self-hosted Piston, the URL must end in `/api/v2` (the function calls `.../execute`) — a bare container URL like `https://piston.example.com` (or Pointing at the root `/`) makes it call the wrong path and get a 405. Fix the env var.
 5. **Check the Vercel function logs**: Vercel → Project → Functions → `programming-run` → Logs. The function now logs the incoming method, the provider URL called, and the provider's HTTP status on every run and every 405.
 
-Optionally run `supabase/seed-programming.sql` in the Supabase SQL Editor to create the "C++ Basic Programming" demo activity (Sum of N Integers, 20 pts, 4 samples + 2 hidden cases). Seed data is idempotent. No Supabase Edge Functions or CLI are required.
+### GitHub → Vercel (auto-deploy on every push)
+
+A GitHub Actions workflow (`.github/workflows/deploy.yml`) rebuilds and redeploys your production site to Vercel every time you push to `main`. To enable it:
+
+1. Push this folder to a **GitHub repository**.
+2. Import the repository in Vercel (Dashboard → Add New → Project → import). Once imported, Vercel stores your **Project ID** and **Org ID**.
+3. Create a **Vercel token**: Vercel Dashboard → Settings → Tokens → Create (scope: your account).
+4. In the GitHub repo → **Settings → Secrets and variables → Actions**, add these secrets:
+   - `VERCEL_TOKEN` — the token from step 3
+   - `VERCEL_ORG_ID` — from `vercel project ls` or `.vercel/project.json` after a local `vercel link`
+   - `VERCEL_PROJECT_ID` — same place
+5. Set the environment variables (the `SUPABASE_URL`, `RUNNER_PROVIDER`, etc. list above) in **Vercel → Project → Settings → Environment Variables** (production).
+6. Push to `main` — the workflow runs `npm run check`, then deploys. `package-lock.json` is committed so installs are reproducible.
+
+After deploy, verify the full chain: open `<your-vercel-url>/api/programming-run/health?ping=1` — `200` means frontend + function + execution provider all work.
+
+### Hosting ONLY the front-end on GitHub Pages (API stays on Vercel)
+
+If you serve the HTML pages from GitHub Pages but keep the runner API on Vercel, the relative URL won't work (the browser would call `github.io/api/...`). Fix it in **one file**:
+
+1. In `js/site-config.js` set the absolute URL of your Vercel function:
+
+   ```js
+   window.WQTECH_RUNNER_URL = "https://<your-project>.vercel.app/api/programming-run";
+   ```
+
+2. The browser will call the Vercel function cross-origin. CORS is already configured (headers + `OPTIONS` preflight) in `vercel.json` and `api/programming-run.js`.
+
+When the override is left empty, the site auto-detects: Vercel hosts (default and custom domains) use `/api/programming-run`; `file://` and GitHub Pages show a clear console hint instead of a cryptic error.
+
+Run `supabase/schema.sql` (core system) and `supabase/programming.sql` (programming module) in the Supabase SQL Editor — schema only, no seed data. Activities, problems and test cases are created by the admin through the UI.
 
 ---
 

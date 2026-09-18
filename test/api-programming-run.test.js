@@ -158,6 +158,27 @@ function check(name, cond, extra) {
   const noneb = JSON.parse(none._body);
   check('provider disabled -> 502 (never faked success)', none.statusCode === 502 && noneb.error && Array.isArray(noneb.error.tried) && noneb.error.tried.length === 0, JSON.stringify(noneb.error));
 
+  // ---- Transient rate-limit (429) -> one automatic server retry succeeds ----
+  let judge0Calls = 0;
+  stubFetch(async (url, opts) => {
+    judge0Calls++;
+    if (judge0Calls === 1) return { ok: false, status: 429, text: async () => 'rate limited', json: async () => ({ error: 'rate limited' }) };
+    return jsonRes(judge0Response(), 200);
+  });
+  const m11 = loadApi({ RUNNER_SKIP_AUTH: '1', RUNNER_PROVIDER: 'judge0' });
+  const rtry = await call(m11, { body: { language: 'c++', source: SUM_SRC, stdin: '5\n10 20 30 40 50\n' } });
+  const rtryb = JSON.parse(rtry._body);
+  check('transient 429 -> auto-retry then 200 ok:true', rtry.statusCode === 200 && rtryb.ok === true && rtryb.result && rtryb.result.stdout === '150', 'status=' + rtry.statusCode + ' stdout=' + JSON.stringify(rtryb.result && rtryb.result.stdout));
+  check('transient 429 retried exactly once', judge0Calls === 2, 'provider_calls=' + judge0Calls);
+
+  // ---- Persistent 5xx -> fails AFTER the retry, never faked success ----
+  let fiveCalls = 0;
+  stubFetch(async () => { fiveCalls++; return { ok: false, status: 503, text: async () => '{"error":"upstream down"}', json: async () => ({ error: 'upstream down' }) }; });
+  const m12 = loadApi({ RUNNER_SKIP_AUTH: '1', RUNNER_PROVIDER: 'judge0' });
+  const prs = await call(m12, { body: { language: 'python', source: 'print(1)', stdin: '' } });
+  const prsb = JSON.parse(prs._body);
+  check('persistent 5xx -> 502 after 2 attempts, still a service error', prs.statusCode === 502 && prsb.ok === false && prsb.error && prsb.error.message.indexOf('Execution service error') === 0 && fiveCalls === 2, 'calls=' + fiveCalls + ' ' + JSON.stringify(prsb.error && prsb.error.message));
+
   // ---- New languages resolve ----
   stubFetch(async () => jsonRes(judge0Response({ stdout: 'ok\n' }), 200));
   const m10 = loadApi({ RUNNER_SKIP_AUTH: '1', RUNNER_PROVIDER: 'judge0' });

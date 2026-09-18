@@ -315,62 +315,65 @@ window.Programming = (function () {
     } catch (e) {}
   }
 
+  // Automatic retry for TRANSIENT network failures ONLY (fetch threw before
+  // an HTTP response was received). An HTTP response from the runner already
+  // includes the server's own provider retries + fallback, so 4xx/5xx are
+  // treated as final — never hidden, never duplicated.
   async function runInSandbox({ language, source, stdin, timeoutMs }) {
     if (!source) throw new Error('No code to run.');
     if (!FUNCTIONS_BASE) {
       const err = executionError(0, 'The code runner backend is not configured for this site. window.RUNNER_API_URL is empty. Deploy api/programming-run.js to Vercel.', { provider: 'backend' });
       throw err;
     }
-    // Verify runner is deployed before trying a full execution.
-    const health = await checkRunnerHealth();
-    if (health && !health.ok) {
-      throw executionError(health.status || 405, health.message || 'Runner API is not deployed.', {
-        provider: 'backend',
-        language: displayLang(language),
-        url: FUNCTIONS_BASE,
-        hint: 'Open ' + FUNCTIONS_BASE + '/health in your browser to verify the function is deployed.'
-      });
-    }
     const t = parseInt(timeoutMs, 10) || 4000;
-    const controller = new AbortController();
-    const to = setTimeout(() => controller.abort(), Math.min(t + 15000, 30000));
-    const token = await getAccessToken();
-    let res;
-    try {
-      res = await fetch(FUNCTIONS_BASE, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-        body: JSON.stringify({ language, source, stdin: stdin || '', timeout_ms: t }),
-        signal: controller.signal
-      });
-    } catch (e) {
+    const maxAttempts = 2;
+    let lastErr = null;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (attempt > 1) await new Promise((r) => setTimeout(r, 700));
+      const controller = new AbortController();
+      const to = setTimeout(() => controller.abort(), Math.min(t + 15000, 30000));
+      const token = await getAccessToken();
+      let res;
+      try {
+        res = await fetch(FUNCTIONS_BASE, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+          body: JSON.stringify({ language, source, stdin: stdin || '', timeout_ms: t }),
+          signal: controller.signal
+        });
+      } catch (e) {
+        clearTimeout(to);
+        logRunnerFailure('function', { language: displayLang(language), version: null, sourceLength: source.length, stdin: stdin || '', requestBody: { language, source }, url: FUNCTIONS_BASE, status: 0, responseBody: String(e && e.message || e) });
+        lastErr = executionError(0, 'Runner unreachable: ' + (e && e.message || e), { provider: 'backend', language: displayLang(language), url: FUNCTIONS_BASE });
+        if (attempt < maxAttempts) continue; // transient network blip
+        break;
+      }
       clearTimeout(to);
-      logRunnerFailure('function', { language: displayLang(language), version: null, sourceLength: source.length, stdin: stdin || '', requestBody: { language, source }, url: FUNCTIONS_BASE, status: 0, responseBody: String(e && e.message || e) });
-      throw executionError(0, 'Runner unreachable: ' + (e && e.message || e), { provider: 'backend', language: displayLang(language), url: FUNCTIONS_BASE });
-    }
-    clearTimeout(to);
-    let body;
-    try { body = await res.json(); } catch (e) { body = null; }
-    if (res.ok && body && body.ok && body.result) return normalizeRun(body.result);
+      let body;
+      try { body = await res.json(); } catch (e) { body = null; }
+      if (res.ok && body && body.ok && body.result) return normalizeRun(body.result);
 
-    // Any non-200 / non-ok here is a categorized EXECUTION SERVICE ERROR
-    // (HTTP 400, provider down, auth, ...). It is never reported as the
-    // student's Wrong Answer / Compilation Error.
-    const err = (body && body.error) || {};
-    const detail = err.detail || err.message || '';
-    const http405hint = (res.status === 405)
-      ? ' HTTP 405 = the Vercel serverless function is NOT deployed; the static host is answering POST with Method Not Allowed. Deploy this project on Vercel (git push → import → set env vars), then verify '
-        + FUNCTIONS_BASE + '/health. If you are testing locally, open the Vercel deployment URL instead of the local file/server.'
-      : '';
-    logRunnerFailure(err.provider || 'function', { language: displayLang(language), version: err.version || null, sourceLength: source.length, stdin: stdin || '', requestBody: { language, source, stdin: stdin || '', timeout_ms: t }, url: FUNCTIONS_BASE, status: res.status, responseBody: JSON.stringify(body || '').slice(0, 2000) });
-    throw executionError(res.status, (detail || String(res.status)) + http405hint, {
-      provider: err.provider || 'backend',
-      language: displayLang(language),
-      version: err.version || null,
-      url: FUNCTIONS_BASE,
-      payload: { language, source, stdin: stdin || '', timeout_ms: t },
-      response: JSON.stringify(body || '').slice(0, 2000)
-    });
+      // Any non-200 / non-ok here is a categorized EXECUTION SERVICE ERROR
+      // (HTTP 400, provider down, auth, ...). It is never reported as the
+      // student's Wrong Answer / Compilation Error.
+      const err = (body && body.error) || {};
+      const detail = err.detail || err.message || '';
+      const http405hint = (res.status === 405)
+        ? ' HTTP 405 = the Vercel serverless function is NOT deployed; the static host is answering POST with Method Not Allowed. Deploy this project on Vercel (git push → import → set env vars), then verify '
+          + FUNCTIONS_BASE + '/health. If you are testing locally, open the Vercel deployment URL instead of the local file/server.'
+        : '';
+      logRunnerFailure(err.provider || 'function', { language: displayLang(language), version: err.version || null, sourceLength: source.length, stdin: stdin || '', requestBody: { language, source, stdin: stdin || '', timeout_ms: t }, url: FUNCTIONS_BASE, status: res.status, responseBody: JSON.stringify(body || '').slice(0, 2000) });
+      lastErr = executionError(res.status, (detail || String(res.status)) + http405hint, {
+        provider: err.provider || 'backend',
+        language: displayLang(language),
+        version: err.version || null,
+        url: FUNCTIONS_BASE,
+        payload: { language, source, stdin: stdin || '', timeout_ms: t },
+        response: JSON.stringify(body || '').slice(0, 2000)
+      });
+      break;
+    }
+    throw lastErr || executionError(0, 'Execution service error', { provider: 'backend', language: displayLang(language) });
   }
 
   // One test case => run => pass/fail. Points come from the dynamic

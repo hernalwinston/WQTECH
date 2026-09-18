@@ -318,6 +318,12 @@ async function runCode(args) {
   const tried = [];
   const attempts = [];
   const wanted = PROVIDER === "piston" ? ["piston"] : PROVIDER === "judge0" ? ["judge0"] : ["piston", "judge0"];
+  // One automatic retry per provider for TRANSIENT failures only
+  // (rate limits / momentary 5xx). Config errors (4xx) and student-code
+  // results (compile/runtime/tle/mle) are never retried, so an error can
+  // never be masked or duplicated.
+  const MAX_PROVIDER_ATTEMPTS = 2;
+  const isTransient = (s) => s === 429 || (typeof s === "number" && s >= 500 && s < 600) || s === "timeout" || s === "exception";
 
   for (const name of wanted) {
     if (name === "piston" && !PISTON_BASE_URL) {
@@ -329,26 +335,40 @@ async function runCode(args) {
       continue;
     }
     tried.push(name);
-    const providerStart = Date.now();
-    try {
-      if (name === "piston") {
-        const pistonLang = LANGS[args.lang].piston;
-        const version = await pistonVersion(pistonLang, LANGS[args.lang].version);
-        console.log("programming-run calling piston", JSON.stringify({ url: PISTON_BASE_URL + "/execute", lang: args.lang, pistonLang, version, stdin_len: (args.stdin || "").length }));
-        const out = await runPiston({ lang: args.lang, source: args.source, stdin: args.stdin, runTimeoutMs: args.timeoutMs, version });
-        console.log("programming-run piston result", JSON.stringify({ provider: name, ms: Date.now() - providerStart, ok: !out.error, error_status: out.error ? out.error.status : null }));
-        if (out.error) { attempts.push({ provider: name, status: out.error.status, body: out.error.body }); continue; }
+
+    for (let attempt = 1; attempt <= MAX_PROVIDER_ATTEMPTS; attempt++) {
+      const providerStart = Date.now();
+      try {
+        let out;
+        if (name === "piston") {
+          const pistonLang = LANGS[args.lang].piston;
+          const version = await pistonVersion(pistonLang, LANGS[args.lang].version);
+          console.log("programming-run calling piston", JSON.stringify({ url: PISTON_BASE_URL + "/execute", lang: args.lang, pistonLang, version, attempt, stdin_len: (args.stdin || "").length }));
+          out = await runPiston({ lang: args.lang, source: args.source, stdin: args.stdin, runTimeoutMs: args.timeoutMs, version });
+        } else {
+          console.log("programming-run calling judge0", JSON.stringify({ url: RUNNER_URL, lang: args.lang, judge0_id: LANGS[args.lang].judge0, attempt, stdin_len: (args.stdin || "").length }));
+          out = await runJudge0({ lang: args.lang, source: args.source, stdin: args.stdin, runTimeoutMs: args.timeoutMs, timeoutMs: args.timeoutMs });
+        }
+        console.log("programming-run " + name + " result", JSON.stringify({ provider: name, attempt, ms: Date.now() - providerStart, ok: !out.error, error_status: out.error ? out.error.status : null }));
+        if (out.error) {
+          attempts.push({ provider: name, attempt, status: out.error.status, body: out.error.body });
+          if (isTransient(out.error.status) && attempt < MAX_PROVIDER_ATTEMPTS) {
+            console.log("programming-run retry " + name + " after transient " + String(out.error.status) + " (attempt " + attempt + ")");
+            await new Promise((r) => setTimeout(r, 500));
+            continue;
+          }
+          break;
+        }
         return { result: out.result, tried };
+      } catch (e) {
+        const aborted = (e && e.name === "AbortError");
+        console.error("programming-run provider exception", JSON.stringify({ provider: name, attempt, ms: Date.now() - providerStart, error: e instanceof Error ? e.message : String(e) }));
+        attempts.push({ provider: name, attempt, status: aborted ? "timeout" : "exception", body: aborted ? "execution service timed out" : (e instanceof Error ? e.message : String(e)) });
+        if (isTransient(aborted ? "timeout" : "exception") && attempt < MAX_PROVIDER_ATTEMPTS) {
+          await new Promise((r) => setTimeout(r, 500));
+          continue;
+        }
       }
-      console.log("programming-run calling judge0", JSON.stringify({ url: RUNNER_URL, lang: args.lang, judge0_id: LANGS[args.lang].judge0, stdin_len: (args.stdin || "").length }));
-      const out = await runJudge0({ lang: args.lang, source: args.source, stdin: args.stdin, runTimeoutMs: args.timeoutMs, timeoutMs: args.timeoutMs });
-      console.log("programming-run judge0 result", JSON.stringify({ provider: name, ms: Date.now() - providerStart, ok: !out.error, error_status: out.error ? out.error.status : null }));
-      if (out.error) { attempts.push({ provider: name, status: out.error.status, body: out.error.body }); continue; }
-      return { result: out.result, tried };
-    } catch (e) {
-      const aborted = (e && e.name === "AbortError");
-      console.error("programming-run provider exception", JSON.stringify({ provider: name, ms: Date.now() - providerStart, error: e instanceof Error ? e.message : String(e) }));
-      attempts.push({ provider: name, status: aborted ? "timeout" : "exception", body: aborted ? "execution service timed out" : (e instanceof Error ? e.message : String(e)) });
     }
   }
 

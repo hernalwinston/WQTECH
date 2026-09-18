@@ -450,10 +450,10 @@
                        key === 'csharp' ? /Console\s*\.\s*(Write|WriteLine)\s*\(/ :
                        key === 'java' ? /System\s*\.\s*out\s*\.\s*(print|println|printf)\s*\(/ :
                        /cout\s*<</;
-        const inPat = key === 'c' ? /scanf\s*\(/ :
+        const inPat = key === 'c' ? /scanf\s*\(|fgets\s*\(|getchar\s*\(|getc\s*\(|std::getline\s*\(\s*cin/i :
                       key === 'csharp' ? /ReadLine\s*\(/ :
                       key === 'java' ? /\.\s*next(Int|Long|Double|Float|Line|Short|Byte|Boolean|BigInteger|BigDecimal)?\s*\(/ :
-                      /cin\s*>>/;
+                      /cin\s*>>|getline\s*\(\s*cin|std::getline\s*\(\s*cin/i;
         for (const raw of code.split(';')) {
           const s = raw.trim();
           if (!s) continue;
@@ -608,30 +608,46 @@
         lastSavedAt = Date.now(); updateSaveStatus();
       } catch (e) { try { scheduleSave(); } catch (e2) { updateSaveStatus('error'); } }
       const stdin = ioUserInputs.join('\n') + '\n';
-      let res;
-      try {
-        res = await Programming.runInSandbox({ language: RUN_LANG, source: src, stdin, timeoutMs: 4000 });
-      } catch (e) {
-        showRunError('Could not run: ', e);
-        finishConsole();
-        await deactivateInteractive();
-        return;
+      // EOF sentinel for the probe: a NON-NUMERIC token. When the program is
+      // a "read numbers until end of file" loop (while (cin >> n) ... total),
+      // parsing the sentinel FAILS, which behaves exactly like EOF — so the
+      // loop finishes the same way it would on a real terminal (Ctrl+Z/D) and
+      // the correct sum is shown. The old numeric probe ("9") was consumable,
+      // so it changed the output and every EOF-loop kept "still reading".
+      const EOF_PROBE = '__wq_eof__';
+      const stillNeedMore = !forceDone && ioPlan && ioPlan.inputs > ioUserInputs.length;
+      let res = null;
+      if (!stillNeedMore) {
+        try {
+          res = await Programming.runInSandbox({ language: RUN_LANG, source: src, stdin, timeoutMs: 4000 });
+        } catch (e) {
+          showRunError('Could not run: ', e);
+          finishConsole();
+          await deactivateInteractive();
+          return;
+        }
       }
-      // Probe only when the student has NOT pressed "Finish input". The
-      // probe appends one extra (never 0) line to learn whether the program
-      // is still blocked reading from the terminal.
-      const probe = forceDone ? null : await Programming.runInSandbox({ language: RUN_LANG, source: src, stdin: stdin + '9\n', timeoutMs: 4000 })
-        .catch((e) => { console.error(e); return null; });
+      // Probe only when the student has NOT pressed "Finish input" and has
+      // already supplied every statically-detected input. The probe appends
+      // one extra (never 0, never numeric) EOF-sentinel line to learn whether
+      // the program is still blocked reading from the terminal.
+      const probe = (!forceDone && !stillNeedMore)
+        ? await Programming.runInSandbox({ language: RUN_LANG, source: src, stdin: stdin + EOF_PROBE + '\n', timeoutMs: 4000 })
+            .catch((e) => { console.error(e); return null; })
+        : null;
       const probeErr = probe && (probe.compile_error || probe.runtime_error || probe.status === 'tle');
-      if (!forceDone && probe && !probeErr && normOut(probe.stdout) !== normOut(res.stdout) && !res.compile_error) {
-        // The program is still waiting for input — keep the console open.
-        const tail = interactiveTail(res.stdout || '', ioPlan ? ioPlan.steps : []);
-        const shown = trimOut(tail == null ? (res.stdout || '') : tail);
+      const needsMore = stillNeedMore
+        || (!forceDone && probe && !probeErr && normOut(probe.stdout) !== normOut(res.stdout) && !res.compile_error);
+      if (needsMore) {
+        const tail = res ? interactiveTail(res.stdout || '', ioPlan ? ioPlan.steps : []) : null;
+        const shown = res ? trimOut(tail == null ? (res.stdout || '') : tail) : '';
         if (shown) appendConsole(shown, 'ok');
         ioLineEl = newLine(); ioLineOpen = false;
         showLiveInput(ioLineEl);
         addDoneButton();
-        finishConsole('The program may still be reading input — type the next value and press Enter, or use "Finish input" below');
+        finishConsole(stillNeedMore
+          ? ('This program reads ' + ioPlan.inputs + ' value(s) — you entered ' + ioUserInputs.length + '. Type the next value and press Enter, or use "Finish input" below')
+          : 'The program may still be reading input — type the next value and press Enter, or use "Finish input" below');
         return;
       }
       if (res.compile_error) { appendConsole('Compilation Error', 'err'); appendConsole(res.compile_error || '', 'err'); finishConsole(); await deactivateInteractive(); return; }
@@ -739,6 +755,11 @@
       const passed = graded.filter(r => r.passed).length;
       const gradeTotal = (report.grading_count != null) ? report.grading_count : graded.length;
       let rows = '', hiddenIndex = 0;
+      if (report.status === 'execution_service_error') {
+        rows = '<div class="pa-row pa-svc-err">' +
+          '<div class="pa-row-main"><div class="pa-row-title">Grading service temporarily unreachable</div>' +
+          '<div class="pa-row-sub">The code-runner service could not be reached, so this attempt was <b>not</b> judged — your code wasn\u2019t marked wrong. Check again in a moment.</div></div></div>';
+      }
       results.forEach((r) => {
         const isSample = r.expected !== 'Hidden';
         if (!isSample) hiddenIndex++;
